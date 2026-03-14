@@ -1,0 +1,41 @@
+# Auto-detect text files and normalise line endings
+* text=auto eol=crlf
+
+# Source code
+*.cpp text diff=cpp
+*.hpp text diff=cpp
+*.h   text diff=cpp
+*.c   text diff=cpp
+
+# Shaders
+*.hlsl  text
+*.hlsli text
+
+# Build
+*.cmake text
+CMakeLists.txt text
+
+# Config / docs
+*.md   text diff=markdown
+*.json text
+*.yaml text
+*.yml  text
+*.xml  text
+
+# Scripts
+*.ps1  text eol=crlf
+*.bat  text eol=crlf
+*.sh   text eol=lf
+
+# Resources / binary
+*.ico  binary
+*.png  binary
+*.jpg  binary
+*.bmp  binary
+*.pmx  binary
+*.vmd  binary
+*.pmd  binary
+
+# Windows-specific
+*.rc   text
+*.manifest text

@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="MMDDesktopMascot/MMDDesktopMascot.vcxproj" Id="42a085b8-4fa1-4e92-b72c-48afe51e1d72" />
+</Solution>

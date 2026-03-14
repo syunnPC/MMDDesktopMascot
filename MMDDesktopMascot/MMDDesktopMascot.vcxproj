@@ -1,0 +1,256 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>18.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{42a085b8-4fa1-4e92-b72c-48afe51e1d72}</ProjectGuid>
+    <RootNamespace>MMDDesktopMascot</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <LinkIncremental>true</LinkIncremental>
+    <OutDir>$(MSBuildProjectDirectory)\..\x64\Debug\</OutDir>
+    <BulletLibrarySuffix>_Debug</BulletLibrarySuffix>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <OutDir>$(MSBuildProjectDirectory)\..\x64\Release\</OutDir>
+    <BulletLibrarySuffix></BulletLibrarySuffix>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <OpenMPSupport>true</OpenMPSupport>
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <FloatingPointModel>Fast</FloatingPointModel>
+      <AdditionalIncludeDirectories>$(ProjectDir)Core;$(ProjectDir)Common;$(ProjectDir)Model;$(ProjectDir)Animation;$(ProjectDir)Physics;$(ProjectDir)Rendering;$(ProjectDir)Rendering\ThirdParty;$(ProjectDir)UI;$(ProjectDir)Platform;$(ProjectDir)..\external\bullet3\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <Profile>false</Profile>
+      <LinkTimeCodeGeneration>Default</LinkTimeCodeGeneration>
+      <AdditionalLibraryDirectories>$(ProjectDir)..\build\bullet-msbuild\lib\Debug;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>BulletSoftBody_Debug.lib;BulletDynamics_Debug.lib;BulletCollision_Debug.lib;LinearMath_Debug.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <Manifest>
+      <AdditionalManifestFiles>Platform\app.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles>
+    </Manifest>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level4</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <Optimization>MaxSpeed</Optimization>
+      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+      <OpenMPSupport>true</OpenMPSupport>
+      <EnableVectorLength>NotSet</EnableVectorLength>
+      <FloatingPointModel>Fast</FloatingPointModel>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <AdditionalIncludeDirectories>$(ProjectDir)Core;$(ProjectDir)Common;$(ProjectDir)Model;$(ProjectDir)Animation;$(ProjectDir)Physics;$(ProjectDir)Rendering;$(ProjectDir)Rendering\ThirdParty;$(ProjectDir)UI;$(ProjectDir)Platform;$(ProjectDir)..\external\bullet3\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
+      <AdditionalLibraryDirectories>$(ProjectDir)..\build\bullet-msbuild\lib\Release;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>BulletSoftBody.lib;BulletDynamics.lib;BulletCollision.lib;LinearMath.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <Manifest>
+      <AdditionalManifestFiles>Platform\app.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles>
+    </Manifest>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ResourceCompile Include="Platform\MMDDesktopMascot.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="Platform\MMDDesktopMascot.ico" />
+    <Image Include="Platform\small.ico" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\README.md" />
+    <None Include="Platform\app.manifest" />
+    <None Include="Rendering\Shaders\FXAA_PS.hlsl">
+      <FileType>Document</FileType>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Rendering\Shaders\Edge_PS.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="Rendering\Shaders\Edge_VS.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="Rendering\Shaders\FXAA_VS.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="Rendering\Shaders\PMX_PS.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="Rendering\Shaders\PMX_VS.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="Rendering\Shaders\Shadow_PS.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="Rendering\Shaders\Shadow_VS.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="Rendering\Shaders\SkinningCommon.hlsli">
+      <FileType>Document</FileType>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Core\App.cpp" />
+    <ClCompile Include="Core\Settings.cpp" />
+    <ClCompile Include="Core\WinMain.cpp" />
+    <ClCompile Include="Common\FileUtil.cpp" />
+    <ClCompile Include="Common\StringUtil.cpp" />
+    <ClCompile Include="Model\BinaryReader.cpp" />
+    <ClCompile Include="Model\PmxLoader.cpp" />
+    <ClCompile Include="Model\PmxModel.cpp" />
+    <ClCompile Include="Animation\BoneSolver.cpp" />
+    <ClCompile Include="Animation\MmdAnimator.cpp" />
+    <ClCompile Include="Animation\ModelLoadWorker.cpp" />
+    <ClCompile Include="Animation\VmdMotion.cpp" />
+    <ClCompile Include="Physics\BulletPhysicsAdapter.cpp" />
+    <ClCompile Include="Physics\MmdPhysicsWorld.cpp" />
+    <ClCompile Include="Physics\PhysicsDebugLog.cpp" />
+    <ClCompile Include="Rendering\Camera.cpp" />
+    <ClCompile Include="Rendering\DcompRenderer.cpp" />
+    <ClCompile Include="Rendering\Dx12Context.cpp" />
+    <ClCompile Include="Rendering\GpuResourceManager.cpp" />
+    <ClCompile Include="Rendering\PmxModelDrawer.cpp" />
+    <ClCompile Include="Rendering\RenderPipelineManager.cpp" />
+    <ClCompile Include="Rendering\WicTexture.cpp" />
+    <ClCompile Include="UI\InputManager.cpp" />
+    <ClCompile Include="UI\ProgressWindow.cpp" />
+    <ClCompile Include="UI\SettingsWindow.cpp" />
+    <ClCompile Include="UI\TrayIcon.cpp" />
+    <ClCompile Include="UI\TrayMenuWindow.cpp" />
+    <ClCompile Include="UI\Win32UiUtil.cpp" />
+    <ClCompile Include="UI\WindowManager.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Core\App.hpp" />
+    <ClInclude Include="Core\Settings.hpp" />
+    <ClInclude Include="Common\DebugUtil.hpp" />
+    <ClInclude Include="Common\ExceptionHelper.hpp" />
+    <ClInclude Include="Common\FileUtil.hpp" />
+    <ClInclude Include="Common\StringUtil.hpp" />
+    <ClInclude Include="Model\BinaryReader.hpp" />
+    <ClInclude Include="Model\PmxLoader.hpp" />
+    <ClInclude Include="Model\PmxModel.hpp" />
+    <ClInclude Include="Animation\BoneSolver.hpp" />
+    <ClInclude Include="Animation\MmdAnimator.hpp" />
+    <ClInclude Include="Animation\ModelLoadWorker.hpp" />
+    <ClInclude Include="Animation\VmdMotion.hpp" />
+    <ClInclude Include="Physics\BulletPhysicsAdapter.hpp" />
+    <ClInclude Include="Physics\MmdPhysicsWorld.hpp" />
+    <ClInclude Include="Physics\PhysicsDebugLog.hpp" />
+    <ClInclude Include="Rendering\Camera.hpp" />
+    <ClInclude Include="Rendering\DcompRenderer.hpp" />
+    <ClInclude Include="Rendering\Dx12Context.hpp" />
+    <ClInclude Include="Rendering\GpuResourceManager.hpp" />
+    <ClInclude Include="Rendering\PmxModelDrawer.hpp" />
+    <ClInclude Include="Rendering\RenderPipelineManager.hpp" />
+    <ClInclude Include="Rendering\WicTexture.hpp" />
+    <ClInclude Include="Rendering\ThirdParty\d3dx12.h" />
+    <ClInclude Include="UI\InputManager.hpp" />
+    <ClInclude Include="UI\ProgressWindow.hpp" />
+    <ClInclude Include="UI\SettingsWindow.hpp" />
+    <ClInclude Include="UI\TrayIcon.hpp" />
+    <ClInclude Include="UI\TrayMenuWindow.hpp" />
+    <ClInclude Include="UI\Win32UiUtil.hpp" />
+    <ClInclude Include="UI\WindowManager.hpp" />
+    <ClInclude Include="Platform\Resource.h" />
+    <ClInclude Include="Platform\framework.h" />
+    <ClInclude Include="Platform\targetver.h" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <Target Name="EnsureBulletSource" BeforeTargets="ClCompile;Link">
+    <PropertyGroup>
+      <RepoRoot>$(MSBuildProjectDirectory)\..</RepoRoot>
+      <BulletSourceDir>$(RepoRoot)\external\bullet3</BulletSourceDir>
+    </PropertyGroup>
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(RepoRoot)\fetch_bullet.ps1&quot;" Condition="!Exists('$(BulletSourceDir)\CMakeLists.txt')" />
+  </Target>
+  <Target Name="EnsureBulletLibraries" BeforeTargets="Link">
+    <PropertyGroup>
+      <RepoRoot>$(MSBuildProjectDirectory)\..</RepoRoot>
+      <BulletSourceDir>$(RepoRoot)\external\bullet3</BulletSourceDir>
+      <BulletBuildDir>$(RepoRoot)\build\bullet-msbuild</BulletBuildDir>
+      <BulletLibDir>$(BulletBuildDir)\lib\$(Configuration)</BulletLibDir>
+      <BulletSoftBodyLib>$(BulletLibDir)\BulletSoftBody$(BulletLibrarySuffix).lib</BulletSoftBodyLib>
+      <BulletDynamicsLib>$(BulletLibDir)\BulletDynamics$(BulletLibrarySuffix).lib</BulletDynamicsLib>
+      <BulletCollisionLib>$(BulletLibDir)\BulletCollision$(BulletLibrarySuffix).lib</BulletCollisionLib>
+      <LinearMathLib>$(BulletLibDir)\LinearMath$(BulletLibrarySuffix).lib</LinearMathLib>
+      <BulletProvisionStamp>$(BulletBuildDir)\.copilot-bullet-runtime-md-v1.stamp</BulletProvisionStamp>
+      <BulletNeedsProvision>false</BulletNeedsProvision>
+      <BulletNeedsProvision Condition="!Exists('$(BulletBuildDir)\CMakeCache.txt') OR !Exists('$(BulletSoftBodyLib)') OR !Exists('$(BulletDynamicsLib)') OR !Exists('$(BulletCollisionLib)') OR !Exists('$(LinearMathLib)') OR !Exists('$(BulletProvisionStamp)')">true</BulletNeedsProvision>
+    </PropertyGroup>
+    <Message Importance="high" Text="Provisioning Bullet dependency artifacts in $(BulletBuildDir)..." Condition="'$(BulletNeedsProvision)'=='true'" />
+    <Exec Command="cmake -S &quot;$(BulletSourceDir)&quot; -B &quot;$(BulletBuildDir)&quot; -G &quot;Visual Studio 17 2022&quot; -A x64 -T $(PlatformToolset) -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DUSE_MSVC_RUNTIME_LIBRARY_DLL=ON -DBUILD_BULLET2_DEMOS=OFF -DBUILD_CPU_DEMOS=OFF -DBUILD_OPENGL3_DEMOS=OFF -DBUILD_UNIT_TESTS=OFF -DBUILD_EXTRAS=OFF -DBUILD_BULLET3=OFF -DBUILD_PYBULLET=OFF -DBUILD_ENET=OFF -DBUILD_CLSOCKET=OFF -DUSE_GRAPHICAL_BENCHMARK=OFF -DINSTALL_LIBS=OFF" Condition="'$(BulletNeedsProvision)'=='true'" />
+    <Exec Command="cmake --build &quot;$(BulletBuildDir)&quot; --config $(Configuration) --target BulletSoftBody BulletDynamics BulletCollision LinearMath" Condition="'$(BulletNeedsProvision)'=='true'" />
+    <WriteLinesToFile File="$(BulletProvisionStamp)" Lines="USE_MSVC_RUNTIME_LIBRARY_DLL=ON" Overwrite="true" Condition="'$(BulletNeedsProvision)'=='true'" />
+  </Target>
+  <Target Name="CopyRuntimeShaders" AfterTargets="Build">
+    <ItemGroup>
+      <RuntimeShaderSources Include="Rendering\Shaders\*.hlsl;Rendering\Shaders\*.hlsli" />
+    </ItemGroup>
+    <MakeDir Directories="$(OutDir)Shaders" />
+    <Copy SourceFiles="@(RuntimeShaderSources)" DestinationFolder="$(OutDir)Shaders" SkipUnchangedFiles="true" />
+  </Target>
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>
+
