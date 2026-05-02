@@ -40,6 +40,7 @@ namespace
 		{ "TEXCOORD", 7, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 124, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
 		{ "TEXCOORD", 8, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 140, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
 		{ "TEXCOORD", 9, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 156, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "TANGENT", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 172, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
 	};
 	std::optional<WPARAM> g_deferredQuitCode;
 
@@ -397,13 +398,13 @@ void RenderPipelineManager::CreatePmxRootSignature()
 	params[1].InitAsConstantBufferView(1, 0, D3D12_SHADER_VISIBILITY_ALL);
 
 	CD3DX12_DESCRIPTOR_RANGE srvRange{};
-	srvRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 3, 0, 0);
+	srvRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 4, 0, 0);
 	params[2].InitAsDescriptorTable(1, &srvRange, D3D12_SHADER_VISIBILITY_PIXEL);
 
 	params[3].InitAsConstantBufferView(2, 0, D3D12_SHADER_VISIBILITY_VERTEX);
 
 	CD3DX12_DESCRIPTOR_RANGE shadowRange{};
-	shadowRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 3, 0);
+	shadowRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 4, 0);
 	params[4].InitAsDescriptorTable(1, &shadowRange, D3D12_SHADER_VISIBILITY_PIXEL);
 
 	D3D12_STATIC_SAMPLER_DESC samplers[3]{};
@@ -622,29 +623,114 @@ void RenderPipelineManager::CreateShadowPipeline()
 	}
 }
 
-void RenderPipelineManager::CreateFxaaPipeline()
+void RenderPipelineManager::CreatePostProcessRootSignature()
 {
-	CD3DX12_ROOT_PARAMETER params[2]{};
-	params[0].InitAsConstants(8, 0);
+	CD3DX12_ROOT_PARAMETER params[6]{};
 
-	CD3DX12_DESCRIPTOR_RANGE srvRange{};
-	srvRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
-	params[1].InitAsDescriptorTable(1, &srvRange, D3D12_SHADER_VISIBILITY_PIXEL);
+	params[0].InitAsConstants(16, 0);
 
-	D3D12_STATIC_SAMPLER_DESC samp{};
-	samp.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-	samp.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-	samp.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-	samp.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-	samp.ShaderRegister = 0;
-	samp.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+	CD3DX12_DESCRIPTOR_RANGE sceneSrvRange{};
+	sceneSrvRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
+	params[1].InitAsDescriptorTable(1, &sceneSrvRange, D3D12_SHADER_VISIBILITY_ALL);
+
+	CD3DX12_DESCRIPTOR_RANGE ssaoSrvRange{};
+	ssaoSrvRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 1);
+	params[2].InitAsDescriptorTable(1, &ssaoSrvRange, D3D12_SHADER_VISIBILITY_ALL);
+
+	CD3DX12_DESCRIPTOR_RANGE bloomSrvRange{};
+	bloomSrvRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 2);
+	params[3].InitAsDescriptorTable(1, &bloomSrvRange, D3D12_SHADER_VISIBILITY_ALL);
+
+	CD3DX12_DESCRIPTOR_RANGE depthSrvRange{};
+	depthSrvRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 3);
+	params[4].InitAsDescriptorTable(1, &depthSrvRange, D3D12_SHADER_VISIBILITY_ALL);
+
+	CD3DX12_DESCRIPTOR_RANGE uavRange{};
+	uavRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0);
+	params[5].InitAsDescriptorTable(1, &uavRange, D3D12_SHADER_VISIBILITY_ALL);
+
+	D3D12_STATIC_SAMPLER_DESC samplers[2]{};
+	samplers[0].Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+	samplers[0].AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+	samplers[0].AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+	samplers[0].AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+	samplers[0].ShaderRegister = 0;
+	samplers[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+	samplers[1] = samplers[0];
+	samplers[1].Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
+	samplers[1].ShaderRegister = 1;
 
 	CD3DX12_ROOT_SIGNATURE_DESC rsDesc;
-	rsDesc.Init(2, params, 1, &samp, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+	rsDesc.Init(6, params, 2, samplers, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
 	winrt::com_ptr<ID3DBlob> sigBlob, errBlob;
 	DX_CALL(D3D12SerializeRootSignature(&rsDesc, D3D_ROOT_SIGNATURE_VERSION_1, sigBlob.put(), errBlob.put()));
-	DX_CALL(m_ctx->Device()->CreateRootSignature(0, sigBlob->GetBufferPointer(), sigBlob->GetBufferSize(), IID_PPV_ARGS(m_fxaaRootSig.put())));
+	DX_CALL(m_ctx->Device()->CreateRootSignature(0, sigBlob->GetBufferPointer(), sigBlob->GetBufferSize(), IID_PPV_ARGS(m_postProcessRootSig.put())));
+}
+
+void RenderPipelineManager::CreateSsaoPipeline()
+{
+	if (!m_postProcessRootSig)
+	{
+		CreatePostProcessRootSignature();
+	}
+
+	const auto csBlob = LoadOrCompileShader(
+		L"SSAO_CS.hlsl",
+		L"Compiled_SSAO_CS.cso",
+		"MainCS",
+		"cs_5_0",
+		D3DCOMPILE_OPTIMIZATION_LEVEL3,
+		"D3DCompile SSAO CS");
+
+	D3D12_COMPUTE_PIPELINE_STATE_DESC pso{};
+	pso.pRootSignature = m_postProcessRootSig.get();
+	pso.CS = { csBlob->GetBufferPointer(), csBlob->GetBufferSize() };
+
+	DX_CALL(m_ctx->Device()->CreateComputePipelineState(&pso, IID_PPV_ARGS(m_ssaoPso.put())));
+}
+
+void RenderPipelineManager::CreateBloomPipeline()
+{
+	if (!m_postProcessRootSig)
+	{
+		CreatePostProcessRootSignature();
+	}
+
+	const auto downBlob = LoadOrCompileShader(
+		L"BloomDownsample_CS.hlsl",
+		L"Compiled_BloomDownsample_CS.cso",
+		"MainCS",
+		"cs_5_0",
+		D3DCOMPILE_OPTIMIZATION_LEVEL3,
+		"D3DCompile Bloom Downsample CS");
+
+	D3D12_COMPUTE_PIPELINE_STATE_DESC downPso{};
+	downPso.pRootSignature = m_postProcessRootSig.get();
+	downPso.CS = { downBlob->GetBufferPointer(), downBlob->GetBufferSize() };
+	DX_CALL(m_ctx->Device()->CreateComputePipelineState(&downPso, IID_PPV_ARGS(m_bloomDownPso.put())));
+
+	const auto blurBlob = LoadOrCompileShader(
+		L"BloomBlur_CS.hlsl",
+		L"Compiled_BloomBlur_CS.cso",
+		"MainCS",
+		"cs_5_0",
+		D3DCOMPILE_OPTIMIZATION_LEVEL3,
+		"D3DCompile Bloom Blur CS");
+
+	D3D12_COMPUTE_PIPELINE_STATE_DESC blurPso{};
+	blurPso.pRootSignature = m_postProcessRootSig.get();
+	blurPso.CS = { blurBlob->GetBufferPointer(), blurBlob->GetBufferSize() };
+	DX_CALL(m_ctx->Device()->CreateComputePipelineState(&blurPso, IID_PPV_ARGS(m_bloomBlurPso.put())));
+}
+
+void RenderPipelineManager::CreateToneMapPipeline()
+{
+	if (!m_postProcessRootSig)
+	{
+		CreatePostProcessRootSignature();
+	}
 
 	const auto vsBlob = LoadOrCompileShader(
 		L"FXAA_VS.hlsl",
@@ -652,17 +738,17 @@ void RenderPipelineManager::CreateFxaaPipeline()
 		"VSMain",
 		"vs_5_0",
 		D3DCOMPILE_OPTIMIZATION_LEVEL3,
-		"D3DCompile FXAA VS");
+		"D3DCompile ToneMap VS");
 	const auto psBlob = LoadOrCompileShader(
-		L"FXAA_PS.hlsl",
-		L"Compiled_FXAA_PS.cso",
+		L"ToneMap_PS.hlsl",
+		L"Compiled_ToneMap_PS.cso",
 		"PSMain",
 		"ps_5_0",
 		D3DCOMPILE_OPTIMIZATION_LEVEL3,
-		"D3DCompile FXAA PS");
+		"D3DCompile ToneMap PS");
 
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC pso{};
-	pso.pRootSignature = m_fxaaRootSig.get();
+	pso.pRootSignature = m_postProcessRootSig.get();
 	pso.VS = { vsBlob->GetBufferPointer(), vsBlob->GetBufferSize() };
 	pso.PS = { psBlob->GetBufferPointer(), psBlob->GetBufferSize() };
 	pso.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
@@ -676,5 +762,5 @@ void RenderPipelineManager::CreateFxaaPipeline()
 	pso.RTVFormats[0] = kPresentRenderTargetFormat;
 	pso.SampleDesc.Count = 1;
 
-	DX_CALL(m_ctx->Device()->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(m_fxaaPso.put())));
+	DX_CALL(m_ctx->Device()->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(m_toneMapPso.put())));
 }

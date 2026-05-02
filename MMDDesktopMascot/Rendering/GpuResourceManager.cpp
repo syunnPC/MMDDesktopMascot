@@ -263,6 +263,7 @@ void GpuResourceManager::ResetTextureCache()
 	m_textureIndexBySrv.clear();
 	m_defaultWhiteSrv = CreateWhiteTexture1x1();
 	m_defaultToonSrv = CreateDefaultToonRamp();
+	m_defaultNormalSrv = CreateFlatNormalTexture1x1();
 }
 
 D3D12_CPU_DESCRIPTOR_HANDLE GpuResourceManager::GetSrvCpuHandle(uint32_t index) const
@@ -310,6 +311,22 @@ uint32_t GpuResourceManager::AllocSrvBlock3()
 	return base;
 }
 
+uint32_t GpuResourceManager::AllocSrvBlock4()
+{
+	if (!m_srvHeap || m_srvCapacity == 0)
+	{
+		throw std::runtime_error("SRV heap is not initialized.");
+	}
+	if (m_srvCapacity < 4 || m_nextSrvIndex > m_srvCapacity - 4)
+	{
+		throw std::runtime_error("SRV heap capacity exceeded.");
+	}
+
+	const uint32_t base = m_nextSrvIndex;
+	m_nextSrvIndex += 4;
+	return base;
+}
+
 void GpuResourceManager::CopySrv(uint32_t dstIndex, uint32_t srcIndex)
 {
 	if (!m_srvHeap || m_srvCapacity == 0)
@@ -335,6 +352,20 @@ uint32_t GpuResourceManager::CreateWhiteTexture1x1()
 	const uint32_t srvIndex = AllocSrvIndex();
 
 	auto tex = CreateTexture2DFromRgba(white, 1, 1);
+	const auto srv = MakeTexture2dSrvDesc(1);
+	m_ctx->Device()->CreateShaderResourceView(tex.get(), &srv, GetSrvCpuHandle(srvIndex));
+	RegisterTexture(std::move(tex), srvIndex, 1, 1, false, false);
+
+	return srvIndex;
+}
+
+uint32_t GpuResourceManager::CreateFlatNormalTexture1x1()
+{
+	const uint8_t normal[4] = { 128, 128, 255, 255 };
+
+	const uint32_t srvIndex = AllocSrvIndex();
+
+	auto tex = CreateTexture2DFromRgba(normal, 1, 1);
 	const auto srv = MakeTexture2dSrvDesc(1);
 	m_ctx->Device()->CreateShaderResourceView(tex.get(), &srv, GetSrvCpuHandle(srvIndex));
 	RegisterTexture(std::move(tex), srvIndex, 1, 1, false, false);

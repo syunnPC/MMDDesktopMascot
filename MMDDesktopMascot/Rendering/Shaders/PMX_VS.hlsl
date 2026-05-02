@@ -75,6 +75,7 @@ struct VSIn
     float4 addUv2 : TEXCOORD7;
     float4 addUv3 : TEXCOORD8;
     float4 addUv4 : TEXCOORD9;
+    float4 tangent : TANGENT;
 };
 
 #include "SkinningCommon.hlsli"
@@ -87,6 +88,7 @@ struct PSIn
     float3 viewDir : TEXCOORD3;
     float2 uv : TEXCOORD0;
     float4 addUv1 : TEXCOORD4;
+    float4 worldTangent : TEXCOORD5;
 };
 
 PSIn VSMain(VSIn i)
@@ -95,6 +97,7 @@ PSIn VSMain(VSIn i)
 
     float3 skinnedPos = i.pos;
     float3 skinnedNrm = i.nrm;
+    float3 skinnedTan = i.tangent.xyz;
 
     if (g_enableSkinning != 0)
     {
@@ -112,15 +115,15 @@ PSIn VSMain(VSIn i)
         {
             if (i.weightType == 3)
             {
-                ApplySdefSkin(i, skinnedPos, skinnedNrm);
+                ApplySdefSkin(i, skinnedPos, skinnedNrm, skinnedTan);
             }
             else if (i.weightType == 4)
             {
-                ApplyQdefSkin(i, skinnedPos, skinnedNrm);
+                ApplyQdefSkin(i, skinnedPos, skinnedNrm, skinnedTan);
             }
             else
             {
-                ApplyLinearSkin(i, skinnedPos, skinnedNrm);
+                ApplyLinearSkin(i, skinnedPos, skinnedNrm, skinnedTan);
             }
         }
     }
@@ -138,5 +141,11 @@ PSIn VSMain(VSIn i)
     o.viewDir = normalize(g_cameraPos - worldPos.xyz);
     o.uv = i.uv;
     o.addUv1 = i.addUv1;
+
+    float3 worldTan = normalize(mul(normalMatrix, skinnedTan));
+    // Re-orthogonalize tangent against normal
+    worldTan = normalize(worldTan - o.worldNormal * dot(o.worldNormal, worldTan));
+    o.worldTangent = float4(worldTan, i.tangent.w);
+
     return o;
 }

@@ -92,6 +92,7 @@ PSIn VSMain(VSIn i)
 
     float3 skinnedPos = i.pos;
     float3 skinnedNrm = i.nrm;
+    float3 skinnedTan = float3(0.0, 0.0, 0.0);
 
     if (g_enableSkinning != 0)
     {
@@ -105,15 +106,15 @@ PSIn VSMain(VSIn i)
         {
             if (i.weightType == 3)
             {
-                ApplySdefSkin(i, skinnedPos, skinnedNrm);
+                ApplySdefSkin(i, skinnedPos, skinnedNrm, skinnedTan);
             }
             else if (i.weightType == 4)
             {
-                ApplyQdefSkin(i, skinnedPos, skinnedNrm);
+                ApplyQdefSkin(i, skinnedPos, skinnedNrm, skinnedTan);
             }
             else
             {
-                ApplyLinearSkin(i, skinnedPos, skinnedNrm);
+                ApplyLinearSkin(i, skinnedPos, skinnedNrm, skinnedTan);
             }
         }
     }

@@ -35,5 +35,6 @@ SamplerState g_samp : register(s0);
 void PSMain(PSIn i)
 {
     float alpha = (g_base.Sample(g_samp, i.uv) * g_textureFactor).a * g_diffuse.a;
-    clip(alpha - 0.01f);
+    float alphaThreshold = (g_alphaCutout > 0.5f) ? 0.333f : 0.01f;
+    clip(alpha - alphaThreshold);
 }

@@ -92,6 +92,14 @@ namespace
 	constexpr int ID_PHYS_GRAVITY_X = 303;
 	constexpr int ID_PHYS_GRAVITY_Y = 304;
 	constexpr int ID_PHYS_GRAVITY_Z = 305;
+	constexpr int ID_PHYS_KIN_POS_THRESHOLD = 306;
+	constexpr int ID_PHYS_KIN_ROT_THRESHOLD = 307;
+	constexpr int ID_PHYS_MIN_VELOCITY_CLIP = 308;
+	constexpr int ID_PHYS_JOINT_STOP_ERP = 309;
+	constexpr int ID_PHYS_CCD_THRESHOLD_SCALE = 310;
+	constexpr int ID_PHYS_SLEEP_LINEAR_THRESHOLD = 311;
+	constexpr int ID_PHYS_SLEEP_ANGULAR_THRESHOLD = 312;
+	constexpr int ID_PHYS_WRITEBACK_ANGLE_THRESHOLD = 313;
 
 	constexpr int ID_OK = 200;
 	constexpr int ID_CANCEL = 201;
@@ -1237,6 +1245,58 @@ void SettingsWindow::CreateControls()
 	AddTooltip(m_physicsGravityZEdit, L"重力加速度。Yが下方向。標準: (0, -98, 0)。");
 	y += rowH + 20;
 
+	CreateSectionHeader(L"物理演算(高度な設定)", xPadding, y, sectionW);
+	CreateDivider(xPadding, y + 24, sectionW);
+	y += 30;
+
+	label = CreateLabel(L"位置変化閾値:", xPadding, y, physicsLabelW);
+	AddTooltip(label, L"キネマティック剛体の位置変化を無視する閾値(距離の2乗)。小さいほど敏感。標準: 1e-12。");
+	m_physicsKinematicPosThresholdEdit = CreateEdit(ID_PHYS_KIN_POS_THRESHOLD, xPadding + physicsLabelW, y, physicsEditW);
+	AddTooltip(m_physicsKinematicPosThresholdEdit, L"キネマティック剛体の位置変化を無視する閾値(距離の2乗)。小さいほど敏感。標準: 1e-12。");
+	y += rowH;
+
+	label = CreateLabel(L"回転変化閾値:", xPadding, y, physicsLabelW);
+	AddTooltip(label, L"キネマティック剛体の回転変化を無視する閾値(1 - dot)。小さいほど敏感。標準: 1e-8。");
+	m_physicsKinematicRotThresholdEdit = CreateEdit(ID_PHYS_KIN_ROT_THRESHOLD, xPadding + physicsLabelW, y, physicsEditW);
+	AddTooltip(m_physicsKinematicRotThresholdEdit, L"キネマティック剛体の回転変化を無視する閾値(1 - dot)。小さいほど敏感。標準: 1e-8。");
+	y += rowH;
+
+	label = CreateLabel(L"最小速度クリップ:", xPadding, y, physicsLabelW);
+	AddTooltip(label, L"DynamicAndPositionAdjust への速度注入を無視する最小速度(m/s)。標準: 1e-4。");
+	m_physicsMinVelocityClipEdit = CreateEdit(ID_PHYS_MIN_VELOCITY_CLIP, xPadding + physicsLabelW, y, physicsEditW);
+	AddTooltip(m_physicsMinVelocityClipEdit, L"DynamicAndPositionAdjust への速度注入を無視する最小速度(m/s)。標準: 1e-4。");
+	y += rowH;
+
+	label = CreateLabel(L"ジョイントERP:", xPadding, y, physicsLabelW);
+	AddTooltip(label, L"6DOFスプリングジョイントのSTOP_ERP。低いほど振動しにくいが緩くなる。標準: 0.475。");
+	m_physicsJointStopErpEdit = CreateEdit(ID_PHYS_JOINT_STOP_ERP, xPadding + physicsLabelW, y, physicsEditW);
+	AddTooltip(m_physicsJointStopErpEdit, L"6DOFスプリングジョイントのSTOP_ERP。低いほど振動しにくいが緩くなる。標準: 0.475。");
+	y += rowH;
+
+	label = CreateLabel(L"CCD閾値倍率:", xPadding, y, physicsLabelW);
+	AddTooltip(label, L"CCD motionThreshold に対する倍率。大きいほど微小変位でCCDが発動しにくい。標準: 1.0。");
+	m_physicsCcdThresholdScaleEdit = CreateEdit(ID_PHYS_CCD_THRESHOLD_SCALE, xPadding + physicsLabelW, y, physicsEditW);
+	AddTooltip(m_physicsCcdThresholdScaleEdit, L"CCD motionThreshold に対する倍率。大きいほど微小変位でCCDが発動しにくい。標準: 1.0。");
+	y += rowH;
+
+	label = CreateLabel(L"Sleep線形閾値:", xPadding, y, physicsLabelW);
+	AddTooltip(label, L" Sleeping判定の線形速度閾値(m/s)。標準: 0.1。");
+	m_physicsSleepLinearThresholdEdit = CreateEdit(ID_PHYS_SLEEP_LINEAR_THRESHOLD, xPadding + physicsLabelW, y, physicsEditW);
+	AddTooltip(m_physicsSleepLinearThresholdEdit, L" Sleeping判定の線形速度閾値(m/s)。標準: 0.1。");
+	y += rowH;
+
+	label = CreateLabel(L"Sleep角速度閾値:", xPadding, y, physicsLabelW);
+	AddTooltip(label, L" Sleeping判定の角速度閾値(rad/s)。標準: 0.1。");
+	m_physicsSleepAngularThresholdEdit = CreateEdit(ID_PHYS_SLEEP_ANGULAR_THRESHOLD, xPadding + physicsLabelW, y, physicsEditW);
+	AddTooltip(m_physicsSleepAngularThresholdEdit, L" Sleeping判定の角速度閾値(rad/s)。標準: 0.1。");
+	y += rowH;
+
+	label = CreateLabel(L"書戻し角度閾値(度):", xPadding, y, physicsLabelW);
+	AddTooltip(label, L"ボーン書き戻し時に無視する最小角度差(度)。0で無効。標準: 0.0。");
+	m_physicsWritebackAngleThresholdEdit = CreateEdit(ID_PHYS_WRITEBACK_ANGLE_THRESHOLD, xPadding + physicsLabelW, y, physicsEditW);
+	AddTooltip(m_physicsWritebackAngleThresholdEdit, L"ボーン書き戻し時に無視する最小角度差(度)。0で無効。標準: 0.0。");
+	y += rowH + 20;
+
 	m_physicsAdvancedStartY = y;
 	m_physicsAdvancedEndY = y;
 	m_physicsAdvancedHeight = 0;
@@ -1459,6 +1519,14 @@ void SettingsWindow::LoadPhysicsSettings(const PhysicsSettings& physics)
 	SetEditFloat(m_physicsGravityXEdit, physics.gravity.x, 4);
 	SetEditFloat(m_physicsGravityYEdit, physics.gravity.y, 4);
 	SetEditFloat(m_physicsGravityZEdit, physics.gravity.z, 4);
+	SetEditFloat(m_physicsKinematicPosThresholdEdit, physics.kinematicPositionThreshold, 12);
+	SetEditFloat(m_physicsKinematicRotThresholdEdit, physics.kinematicRotationThreshold, 12);
+	SetEditFloat(m_physicsMinVelocityClipEdit, physics.minKinematicVelocityClip, 6);
+	SetEditFloat(m_physicsJointStopErpEdit, physics.jointStopErp, 3);
+	SetEditFloat(m_physicsCcdThresholdScaleEdit, physics.ccdThresholdScale, 2);
+	SetEditFloat(m_physicsSleepLinearThresholdEdit, physics.sleepLinearThreshold, 3);
+	SetEditFloat(m_physicsSleepAngularThresholdEdit, physics.sleepAngularThreshold, 3);
+	SetEditFloat(m_physicsWritebackAngleThresholdEdit, physics.writebackAngleThresholdDeg, 2);
 }
 
 void SettingsWindow::LoadLightScalarControls(const LightSettings& light)
@@ -1707,6 +1775,14 @@ void SettingsWindow::BuildPhysicsSettingsFromUi(PhysicsSettings& physics) const
 	physics.gravity.x = GetEditBoxFloat(m_physicsGravityXEdit, physics.gravity.x);
 	physics.gravity.y = GetEditBoxFloat(m_physicsGravityYEdit, physics.gravity.y);
 	physics.gravity.z = GetEditBoxFloat(m_physicsGravityZEdit, physics.gravity.z);
+	physics.kinematicPositionThreshold = std::max(0.0f, GetEditBoxFloat(m_physicsKinematicPosThresholdEdit, physics.kinematicPositionThreshold));
+	physics.kinematicRotationThreshold = std::max(0.0f, GetEditBoxFloat(m_physicsKinematicRotThresholdEdit, physics.kinematicRotationThreshold));
+	physics.minKinematicVelocityClip = std::max(0.0f, GetEditBoxFloat(m_physicsMinVelocityClipEdit, physics.minKinematicVelocityClip));
+	physics.jointStopErp = std::clamp(GetEditBoxFloat(m_physicsJointStopErpEdit, physics.jointStopErp), 0.0f, 1.0f);
+	physics.ccdThresholdScale = std::max(0.0f, GetEditBoxFloat(m_physicsCcdThresholdScaleEdit, physics.ccdThresholdScale));
+	physics.sleepLinearThreshold = std::max(0.0f, GetEditBoxFloat(m_physicsSleepLinearThresholdEdit, physics.sleepLinearThreshold));
+	physics.sleepAngularThreshold = std::max(0.0f, GetEditBoxFloat(m_physicsSleepAngularThresholdEdit, physics.sleepAngularThreshold));
+	physics.writebackAngleThresholdDeg = std::max(0.0f, GetEditBoxFloat(m_physicsWritebackAngleThresholdEdit, physics.writebackAngleThresholdDeg));
 }
 
 void SettingsWindow::BuildSettingsFromUi(AppSettings& out) const

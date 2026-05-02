@@ -216,9 +216,6 @@ void DcompRenderer::Initialize(HWND hwnd, ProgressCallback progress)
 	ReportProgress(0.80f, L"シャドウシェーダーをコンパイルしています...");
 	m_pipeline.CreateShadowPipeline();
 
-	ReportProgress(0.90f, L"FXAAパイプラインを準備しています...");
-	m_pipeline.CreateFxaaPipeline();
-
 	CreateSceneBuffers();
 	CreateBoneBuffers();
 
@@ -229,7 +226,6 @@ void DcompRenderer::ReleaseIntermediateResources()
 {
 	m_intermediateTex = nullptr;
 	m_intermediateRtvHeap = nullptr;
-	m_intermediateSrvHeap = nullptr;
 	m_intermediateState = D3D12_RESOURCE_STATE_RENDER_TARGET;
 }
 
@@ -264,21 +260,126 @@ void DcompRenderer::CreateIntermediateResources()
 	m_intermediateRtvHandle = m_intermediateRtvHeap->GetCPUDescriptorHandleForHeapStart();
 	m_ctx.Device()->CreateRenderTargetView(m_intermediateTex.get(), nullptr, m_intermediateRtvHandle);
 
-	D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc{};
-	srvHeapDesc.NumDescriptors = 1;
-	srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-	srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-	DX_CALL(m_ctx.Device()->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(m_intermediateSrvHeap.put())));
+}
 
-	m_intermediateSrvCpuHandle = m_intermediateSrvHeap->GetCPUDescriptorHandleForHeapStart();
-	m_intermediateSrvGpuHandle = m_intermediateSrvHeap->GetGPUDescriptorHandleForHeapStart();
+void DcompRenderer::ReleasePostProcessResources()
+{
+	m_postProcessHeap = nullptr;
+	m_ssaoTex = nullptr;
+	m_ssaoState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+	m_bloomTex[0] = nullptr;
+	m_bloomTex[1] = nullptr;
+	m_bloomState[0] = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+	m_bloomState[1] = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+	m_bloomWidth = 0;
+	m_bloomHeight = 0;
+}
 
-	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
-	srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-	srvDesc.Format = kSceneRenderTargetFormat;
-	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-	srvDesc.Texture2D.MipLevels = 1;
-	m_ctx.Device()->CreateShaderResourceView(m_intermediateTex.get(), &srvDesc, m_intermediateSrvCpuHandle);
+void DcompRenderer::CreatePostProcessResources()
+{
+	ReleasePostProcessResources();
+
+	if (m_width == 0 || m_height == 0) return;
+
+	m_bloomWidth = std::max(1u, m_width / 2);
+	m_bloomHeight = std::max(1u, m_height / 2);
+
+	// Create shader-visible descriptor heap for all post-process descriptors
+	{
+		D3D12_DESCRIPTOR_HEAP_DESC heapDesc{};
+		heapDesc.NumDescriptors = PP_DescriptorCount;
+		heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+		heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+		DX_CALL(m_ctx.Device()->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(m_postProcessHeap.put())));
+		m_postProcessDescriptorSize = m_ctx.Device()->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+	}
+
+	auto heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+
+	// SSAO texture (R8_UNORM)
+	{
+		auto desc = CD3DX12_RESOURCE_DESC::Tex2D(
+			DXGI_FORMAT_R8_UNORM, m_width, m_height,
+			1, 1, 1, 0,
+			D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+		DX_CALL(m_ctx.Device()->CreateCommittedResource(
+			&heapProps, D3D12_HEAP_FLAG_NONE, &desc,
+			D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr,
+			IID_PPV_ARGS(m_ssaoTex.put())));
+		m_ssaoState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+
+		D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
+		uavDesc.Format = DXGI_FORMAT_R8_UNORM;
+		uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+		auto uavHandle = m_postProcessHeap->GetCPUDescriptorHandleForHeapStart();
+		uavHandle.ptr += (SIZE_T)PP_SsaoUav * m_postProcessDescriptorSize;
+		m_ctx.Device()->CreateUnorderedAccessView(m_ssaoTex.get(), nullptr, &uavDesc, uavHandle);
+
+		D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+		srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+		srvDesc.Format = DXGI_FORMAT_R8_UNORM;
+		srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+		srvDesc.Texture2D.MipLevels = 1;
+		auto srvHandle = m_postProcessHeap->GetCPUDescriptorHandleForHeapStart();
+		srvHandle.ptr += (SIZE_T)PP_SsaoSrv * m_postProcessDescriptorSize;
+		m_ctx.Device()->CreateShaderResourceView(m_ssaoTex.get(), &srvDesc, srvHandle);
+	}
+
+	// Bloom textures (ping-pong, half-res)
+	for (int i = 0; i < 2; ++i)
+	{
+		auto desc = CD3DX12_RESOURCE_DESC::Tex2D(
+			DXGI_FORMAT_R16G16B16A16_FLOAT, m_bloomWidth, m_bloomHeight,
+			1, 1, 1, 0,
+			D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+		DX_CALL(m_ctx.Device()->CreateCommittedResource(
+			&heapProps, D3D12_HEAP_FLAG_NONE, &desc,
+			D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr,
+			IID_PPV_ARGS(m_bloomTex[i].put())));
+		m_bloomState[i] = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+
+		D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
+		uavDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+		uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+		auto uavHandle = m_postProcessHeap->GetCPUDescriptorHandleForHeapStart();
+		uavHandle.ptr += (SIZE_T)(PP_Bloom0Uav + i * 2) * m_postProcessDescriptorSize;
+		m_ctx.Device()->CreateUnorderedAccessView(m_bloomTex[i].get(), nullptr, &uavDesc, uavHandle);
+
+		D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+		srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+		srvDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+		srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+		srvDesc.Texture2D.MipLevels = 1;
+		auto srvHandle = m_postProcessHeap->GetCPUDescriptorHandleForHeapStart();
+		srvHandle.ptr += (SIZE_T)(PP_Bloom0Srv + i * 2) * m_postProcessDescriptorSize;
+		m_ctx.Device()->CreateShaderResourceView(m_bloomTex[i].get(), &srvDesc, srvHandle);
+	}
+
+	// Intermediate scene SRV
+	if (m_intermediateTex)
+	{
+		D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+		srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+		srvDesc.Format = kSceneRenderTargetFormat;
+		srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+		srvDesc.Texture2D.MipLevels = 1;
+		auto srvHandle = m_postProcessHeap->GetCPUDescriptorHandleForHeapStart();
+		srvHandle.ptr += (SIZE_T)PP_IntermediateSrv * m_postProcessDescriptorSize;
+		m_ctx.Device()->CreateShaderResourceView(m_intermediateTex.get(), &srvDesc, srvHandle);
+	}
+
+	// Depth SRV (only for non-MSAA; our SSAO shader uses Texture2D, not Texture2DMS)
+	if (m_depth && m_msaaSampleCount <= 1)
+	{
+		D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+		srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+		srvDesc.Format = DXGI_FORMAT_R32_FLOAT;
+		srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+		srvDesc.Texture2D.MipLevels = 1;
+		auto srvHandle = m_postProcessHeap->GetCPUDescriptorHandleForHeapStart();
+		srvHandle.ptr += (SIZE_T)PP_DepthSrv * m_postProcessDescriptorSize;
+		m_ctx.Device()->CreateShaderResourceView(m_depth.get(), &srvDesc, srvHandle);
+	}
 }
 
 void DcompRenderer::CreateShadowResources()
@@ -342,9 +443,13 @@ void DcompRenderer::UpdateRenderModeResources()
 	WaitForGpu();
 	CreateMsaaTargets();
 	CreateIntermediateResources();
+	CreatePostProcessResources();
 	CreateShadowResources();
 	m_pipeline.CreatePmxPipeline(m_msaaSampleCount, m_msaaQuality);
 	m_pipeline.CreateEdgePipeline(m_msaaSampleCount, m_msaaQuality);
+	m_pipeline.CreateSsaoPipeline();
+	m_pipeline.CreateBloomPipeline();
+	m_pipeline.CreateToneMapPipeline();
 }
 
 void DcompRenderer::CreateSceneBuffers()
@@ -525,11 +630,18 @@ void DcompRenderer::Render(const MmdAnimator& animator)
 	ResizeIfNeeded();
 
 	auto ensureIntermediateResources = [&]() -> bool {
-		if (!m_intermediateTex || !m_intermediateRtvHeap || !m_intermediateSrvHeap)
+		bool recreate = false;
+		if (!m_intermediateTex || !m_intermediateRtvHeap)
 		{
 			CreateIntermediateResources();
+			recreate = true;
 		}
-		return (m_intermediateTex && m_intermediateRtvHeap && m_intermediateSrvHeap);
+		if (!m_postProcessHeap || !m_ssaoTex || !m_bloomTex[0])
+		{
+			CreatePostProcessResources();
+			recreate = true;
+		}
+		return (m_intermediateTex && m_intermediateRtvHeap && m_postProcessHeap && m_ssaoTex && m_bloomTex[0]);
 	};
 
 	struct FrameTransform
@@ -784,6 +896,14 @@ void DcompRenderer::Render(const MmdAnimator& animator)
 			m_cmdList->ResourceBarrier(1, &barrier);
 			m_intermediateState = D3D12_RESOURCE_STATE_RENDER_TARGET;
 		}
+	}
+
+	if (m_depthState != D3D12_RESOURCE_STATE_DEPTH_WRITE)
+	{
+		auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+			m_depth.get(), m_depthState, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+		m_cmdList->ResourceBarrier(1, &barrier);
+		m_depthState = D3D12_RESOURCE_STATE_DEPTH_WRITE;
 	}
 
 	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = useMsaa ? m_msaaRtvHandle : m_intermediateRtvHandle;
@@ -1112,45 +1232,204 @@ void DcompRenderer::Render(const MmdAnimator& animator)
 		m_msaaColorState = D3D12_RESOURCE_STATE_RENDER_TARGET;
 	}
 
+	// Post-process compute passes
 	{
-		D3D12_RESOURCE_BARRIER barriers[2];
-		barriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(
-			m_intermediateTex.get(), m_intermediateState, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+		D3D12_RESOURCE_BARRIER barriers[3];
+		UINT barrierCount = 0;
 
-		barriers[1] = CD3DX12_RESOURCE_BARRIER::Transition(
+		D3D12_RESOURCE_STATES targetState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+		if (m_intermediateState != targetState)
+		{
+			barriers[barrierCount++] = CD3DX12_RESOURCE_BARRIER::Transition(
+				m_intermediateTex.get(), m_intermediateState, targetState);
+			m_intermediateState = targetState;
+		}
+
+		if (m_depthState != D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)
+		{
+			barriers[barrierCount++] = CD3DX12_RESOURCE_BARRIER::Transition(
+				m_depth.get(), m_depthState, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+			m_depthState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+		}
+
+		if (barrierCount > 0)
+		{
+			m_cmdList->ResourceBarrier(barrierCount, barriers);
+		}
+	}
+
+	ID3D12DescriptorHeap* postProcessHeaps[] = { m_postProcessHeap.get() };
+	m_cmdList->SetDescriptorHeaps(1, postProcessHeaps);
+
+	auto GetPostProcessGpuHandle = [&](PostProcessDescriptorIndex index) -> D3D12_GPU_DESCRIPTOR_HANDLE {
+		auto h = m_postProcessHeap->GetGPUDescriptorHandleForHeapStart();
+		h.ptr += (SIZE_T)index * m_postProcessDescriptorSize;
+		return h;
+	};
+
+	// Ensure compute resources are in UAV state
+	{
+		D3D12_RESOURCE_BARRIER barriers[3];
+		UINT barrierCount = 0;
+		if (m_ssaoState != D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
+		{
+			barriers[barrierCount++] = CD3DX12_RESOURCE_BARRIER::Transition(
+				m_ssaoTex.get(), m_ssaoState, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+			m_ssaoState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+		}
+		for (int i = 0; i < 2; ++i)
+		{
+			if (m_bloomState[i] != D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
+			{
+				barriers[barrierCount++] = CD3DX12_RESOURCE_BARRIER::Transition(
+					m_bloomTex[i].get(), m_bloomState[i], D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+				m_bloomState[i] = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+			}
+		}
+		if (barrierCount > 0)
+		{
+			m_cmdList->ResourceBarrier(barrierCount, barriers);
+		}
+	}
+
+	// SSAO (disabled when MSAA is active because depth is multisampled)
+	if (m_lightSettings.ssaoEnabled && m_msaaSampleCount <= 1 && m_ssaoTex && m_postProcessHeap)
+	{
+		m_cmdList->SetComputeRootSignature(m_pipeline.GetPostProcessRootSignature());
+		m_cmdList->SetPipelineState(m_pipeline.GetSsaoPso());
+		XMMATRIX proj = XMMatrixTranspose(XMLoadFloat4x4(reinterpret_cast<const XMFLOAT4X4*>(&scene->proj)));
+		XMMATRIX invProj = XMMatrixInverse(nullptr, proj);
+		XMFLOAT4X4 invProjStore;
+		XMStoreFloat4x4(&invProjStore, invProj);
+		float ssaoConsts[16];
+		for (int i = 0; i < 4; ++i)
+			for (int j = 0; j < 4; ++j)
+				ssaoConsts[i * 4 + j] = invProjStore.m[i][j];
+		m_cmdList->SetComputeRoot32BitConstants(0, 16, ssaoConsts, 0);
+		m_cmdList->SetComputeRootDescriptorTable(1, GetPostProcessGpuHandle(PP_DepthSrv));
+		m_cmdList->SetComputeRootDescriptorTable(5, GetPostProcessGpuHandle(PP_SsaoUav));
+		m_cmdList->Dispatch((m_width + 7) / 8, (m_height + 7) / 8, 1);
+	}
+
+	// Bloom
+	if (m_lightSettings.bloomEnabled && m_bloomTex[0] && m_postProcessHeap)
+	{
+		m_cmdList->SetComputeRootSignature(m_pipeline.GetPostProcessRootSignature());
+		m_cmdList->SetPipelineState(m_pipeline.GetBloomDownsamplePso());
+
+		// Downsample + threshold (scene -> bloom0 UAV)
+		float bloomDownConsts[3] = {
+			0.8f,
+			1.0f / (float)m_bloomWidth,
+			1.0f / (float)m_bloomHeight
+		};
+		m_cmdList->SetComputeRoot32BitConstants(0, 3, bloomDownConsts, 0);
+		m_cmdList->SetComputeRootDescriptorTable(1, GetPostProcessGpuHandle(PP_IntermediateSrv));
+		m_cmdList->SetComputeRootDescriptorTable(5, GetPostProcessGpuHandle(PP_Bloom0Uav));
+		m_cmdList->Dispatch((m_bloomWidth + 7) / 8, (m_bloomHeight + 7) / 8, 1);
+
+		// Transition bloom0 UAV -> SRV for blur H read
+		{
+			D3D12_RESOURCE_BARRIER b = CD3DX12_RESOURCE_BARRIER::Transition(
+				m_bloomTex[0].get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+			m_cmdList->ResourceBarrier(1, &b);
+			m_bloomState[0] = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+		}
+
+		// Blur H (bloom0 SRV -> bloom1 UAV)
+		float blurHConsts[4] = {
+			1.0f / (float)m_bloomWidth,
+			1.0f / (float)m_bloomHeight,
+			1.0f,
+			0.0f
+		};
+		m_cmdList->SetPipelineState(m_pipeline.GetBloomBlurPso());
+		m_cmdList->SetComputeRoot32BitConstants(0, 4, blurHConsts, 0);
+		m_cmdList->SetComputeRootDescriptorTable(1, GetPostProcessGpuHandle(PP_Bloom0Srv));
+		m_cmdList->SetComputeRootDescriptorTable(5, GetPostProcessGpuHandle(PP_Bloom1Uav));
+		m_cmdList->Dispatch((m_bloomWidth + 7) / 8, (m_bloomHeight + 7) / 8, 1);
+
+		// Transition bloom1 UAV -> SRV for blur V read, and bloom0 SRV -> UAV for blur V write
+		{
+			D3D12_RESOURCE_BARRIER barriers[2];
+			barriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(
+				m_bloomTex[1].get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+			m_bloomState[1] = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+			barriers[1] = CD3DX12_RESOURCE_BARRIER::Transition(
+				m_bloomTex[0].get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+			m_bloomState[0] = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+			m_cmdList->ResourceBarrier(2, barriers);
+		}
+
+		// Blur V (bloom1 SRV -> bloom0 UAV)
+		float blurVConsts[4] = {
+			1.0f / (float)m_bloomWidth,
+			1.0f / (float)m_bloomHeight,
+			0.0f,
+			0.0f
+		};
+		m_cmdList->SetPipelineState(m_pipeline.GetBloomBlurPso());
+		m_cmdList->SetComputeRoot32BitConstants(0, 4, blurVConsts, 0);
+		m_cmdList->SetComputeRootDescriptorTable(1, GetPostProcessGpuHandle(PP_Bloom1Srv));
+		m_cmdList->SetComputeRootDescriptorTable(5, GetPostProcessGpuHandle(PP_Bloom0Uav));
+		m_cmdList->Dispatch((m_bloomWidth + 7) / 8, (m_bloomHeight + 7) / 8, 1);
+	}
+
+	// Transitions for final composite
+	{
+		D3D12_RESOURCE_BARRIER barriers[4];
+		UINT barrierCount = 0;
+
+		if (m_ssaoState != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
+		{
+			barriers[barrierCount++] = CD3DX12_RESOURCE_BARRIER::Transition(
+				m_ssaoTex.get(), m_ssaoState, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+			m_ssaoState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+		}
+
+		if (m_bloomState[0] != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
+		{
+			barriers[barrierCount++] = CD3DX12_RESOURCE_BARRIER::Transition(
+				m_bloomTex[0].get(), m_bloomState[0], D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+			m_bloomState[0] = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+		}
+
+		barriers[barrierCount++] = CD3DX12_RESOURCE_BARRIER::Transition(
 			m_renderTargets[frameIndex].get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
 
-		m_cmdList->ResourceBarrier(2, barriers);
-		m_intermediateState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+		if (barrierCount > 0)
+		{
+			m_cmdList->ResourceBarrier(barrierCount, barriers);
+		}
 	}
 
 	auto backBufferRtv = m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
 	backBufferRtv.ptr += (SIZE_T)frameIndex * m_rtvDescriptorSize;
 	m_cmdList->OMSetRenderTargets(1, &backBufferRtv, FALSE, nullptr);
 
-	ID3D12DescriptorHeap* fxaaHeaps[] = { m_intermediateSrvHeap.get() };
-	m_cmdList->SetDescriptorHeaps(1, fxaaHeaps);
-
-	m_cmdList->SetGraphicsRootSignature(m_pipeline.GetFxaaRootSignature());
-	m_cmdList->SetPipelineState(m_pipeline.GetFxaaPso());
+	// ToneMap composite pass
+	m_cmdList->SetGraphicsRootSignature(m_pipeline.GetPostProcessRootSignature());
+	m_cmdList->SetPipelineState(m_pipeline.GetToneMapPso());
 	m_cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-	const float scaleDeviation = std::abs(m_lightSettings.modelScale - 1.0f);
 	const bool enableFxaa = UsesFxaaMode(m_lightSettings.antiAliasingMode);
-	const float sharpenStrength = enableFxaa ? std::clamp(scaleDeviation * 0.05f, 0.0f, 0.08f) : 0.0f;
-	float consts[8] = {
+	const bool ssaoActive = m_lightSettings.ssaoEnabled && (m_msaaSampleCount <= 1);
+	float toneMapConsts[16] = {
 		1.0f / (float)m_width,
 		1.0f / (float)m_height,
-		sharpenStrength,
+		m_lightSettings.exposure,
+		m_lightSettings.ssaoIntensity,
+		m_lightSettings.bloomIntensity,
 		enableFxaa ? 1.0f : 0.0f,
-		0.0f,
-		0.0f,
-		0.0f,
-		0.0f
+		m_lightSettings.filmicToneMapEnabled ? 1.0f : 0.0f,
+		ssaoActive ? 1.0f : 0.0f,
+		m_lightSettings.bloomEnabled ? 1.0f : 0.0f,
+		0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f
 	};
-	m_cmdList->SetGraphicsRoot32BitConstants(0, 8, consts, 0);
-
-	m_cmdList->SetGraphicsRootDescriptorTable(1, m_intermediateSrvGpuHandle);
+	m_cmdList->SetGraphicsRoot32BitConstants(0, 16, toneMapConsts, 0);
+	m_cmdList->SetGraphicsRootDescriptorTable(1, GetPostProcessGpuHandle(PP_IntermediateSrv));
+	m_cmdList->SetGraphicsRootDescriptorTable(2, GetPostProcessGpuHandle(PP_SsaoSrv));
+	m_cmdList->SetGraphicsRootDescriptorTable(3, GetPostProcessGpuHandle(PP_Bloom0Srv));
 
 	m_cmdList->DrawInstanced(3, 1, 0, 0);
 
@@ -1200,8 +1479,12 @@ void DcompRenderer::CreateDepthBuffer()
 
 	auto heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
 
+	// Use D32_FLOAT for MSAA (original, stable path).
+	// Use R32_TYPELESS for non-MSAA so we can create an R32_FLOAT SRV for SSAO.
+	DXGI_FORMAT depthFormat = (m_msaaSampleCount > 1) ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_R32_TYPELESS;
+
 	auto desc = CD3DX12_RESOURCE_DESC::Tex2D(
-		DXGI_FORMAT_D32_FLOAT,
+		depthFormat,
 		m_width, m_height,
 		1, 1,
 		m_msaaSampleCount, m_msaaQuality,
@@ -1214,7 +1497,12 @@ void DcompRenderer::CreateDepthBuffer()
 		&clear, IID_PPV_ARGS(m_depth.put())));
 
 	m_dsvHandle = m_dsvHeap->GetCPUDescriptorHandleForHeapStart();
-	m_ctx.Device()->CreateDepthStencilView(m_depth.get(), nullptr, m_dsvHandle);
+	// Explicit DSV desc to avoid incorrect inference when resource format is TYPELESS.
+	D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc{};
+	dsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
+	dsvDesc.ViewDimension = (m_msaaSampleCount > 1) ? D3D12_DSV_DIMENSION_TEXTURE2DMS : D3D12_DSV_DIMENSION_TEXTURE2D;
+	m_ctx.Device()->CreateDepthStencilView(m_depth.get(), &dsvDesc, m_dsvHandle);
+	m_depthState = D3D12_RESOURCE_STATE_DEPTH_WRITE;
 }
 
 void DcompRenderer::WaitForFrame(UINT frameIndex)

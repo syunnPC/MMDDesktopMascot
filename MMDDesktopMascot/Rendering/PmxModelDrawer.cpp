@@ -267,6 +267,113 @@ namespace
 		target += offset * weight;
 	}
 
+	std::filesystem::path FindNormalMapPath(const std::filesystem::path& baseTexturePath)
+	{
+		if (baseTexturePath.empty()) return {};
+		const std::filesystem::path dir = baseTexturePath.parent_path();
+		const std::wstring stem = baseTexturePath.stem().wstring();
+		const std::wstring ext = baseTexturePath.extension().wstring();
+
+		const std::vector<std::wstring> suffixes = { L"_normal", L"_n", L"_norm" };
+		for (const auto& suffix : suffixes)
+		{
+			std::filesystem::path candidate = dir / (stem + suffix + ext);
+			if (std::filesystem::exists(candidate)) return candidate;
+			candidate = dir / (stem + suffix + L".png");
+			if (std::filesystem::exists(candidate)) return candidate;
+		}
+		return {};
+	}
+
+	void ComputeVertexTangents(
+		std::vector<PmxModelDrawer::PmxVsVertex>& vertices,
+		const std::vector<uint32_t>& indices)
+	{
+		using namespace DirectX;
+		struct Accumulator
+		{
+			XMFLOAT3 tangent = { 0,0,0 };
+			XMFLOAT3 bitangent = { 0,0,0 };
+		};
+		std::vector<Accumulator> acc(vertices.size());
+
+		for (size_t i = 0; i + 2 < indices.size(); i += 3)
+		{
+			const uint32_t i0 = indices[i];
+			const uint32_t i1 = indices[i + 1];
+			const uint32_t i2 = indices[i + 2];
+			if (i0 >= vertices.size() || i1 >= vertices.size() || i2 >= vertices.size()) continue;
+
+			const auto& v0 = vertices[i0];
+			const auto& v1 = vertices[i1];
+			const auto& v2 = vertices[i2];
+
+			XMVECTOR p0 = XMVectorSet(v0.px, v0.py, v0.pz, 0);
+			XMVECTOR p1 = XMVectorSet(v1.px, v1.py, v1.pz, 0);
+			XMVECTOR p2 = XMVectorSet(v2.px, v2.py, v2.pz, 0);
+
+			XMVECTOR e1 = XMVectorSubtract(p1, p0);
+			XMVECTOR e2 = XMVectorSubtract(p2, p0);
+
+			float du1 = v1.u - v0.u;
+			float dv1 = v1.v - v0.v;
+			float du2 = v2.u - v0.u;
+			float dv2 = v2.v - v0.v;
+
+			float det = du1 * dv2 - du2 * dv1;
+			if (std::abs(det) < 1e-8f) continue;
+
+			float invDet = 1.0f / det;
+			XMVECTOR t = XMVectorScale(XMVectorSubtract(XMVectorScale(e1, dv2), XMVectorScale(e2, dv1)), invDet);
+			XMVECTOR b = XMVectorScale(XMVectorSubtract(XMVectorScale(e2, du1), XMVectorScale(e1, du2)), invDet);
+
+			auto add = [](XMFLOAT3& dst, XMVECTOR src) {
+				dst.x += XMVectorGetX(src);
+				dst.y += XMVectorGetY(src);
+				dst.z += XMVectorGetZ(src);
+			};
+			add(acc[i0].tangent, t);
+			add(acc[i0].bitangent, b);
+			add(acc[i1].tangent, t);
+			add(acc[i1].bitangent, b);
+			add(acc[i2].tangent, t);
+			add(acc[i2].bitangent, b);
+		}
+
+		for (size_t i = 0; i < vertices.size(); ++i)
+		{
+			XMVECTOR n = XMVectorSet(vertices[i].nx, vertices[i].ny, vertices[i].nz, 0);
+			XMVECTOR t = XMVectorSet(acc[i].tangent.x, acc[i].tangent.y, acc[i].tangent.z, 0);
+			XMVECTOR b = XMVectorSet(acc[i].bitangent.x, acc[i].bitangent.y, acc[i].bitangent.z, 0);
+
+			// Gram-Schmidt orthogonalize tangent
+			t = XMVectorSubtract(t, XMVectorScale(n, XMVectorGetX(XMVector3Dot(n, t))));
+			float tLenSq = XMVectorGetX(XMVector3LengthSq(t));
+			if (tLenSq > 1e-8f)
+			{
+				t = XMVector3Normalize(t);
+			}
+			else
+			{
+				// Degenerate: pick arbitrary perpendicular vector
+				XMVECTOR up = XMVectorSet(0, 1, 0, 0);
+				if (std::abs(XMVectorGetX(XMVector3Dot(n, up))) > 0.99f)
+					up = XMVectorSet(1, 0, 0, 0);
+				t = XMVector3Cross(n, up);
+				t = XMVector3Normalize(t);
+			}
+
+			// Compute handedness
+			XMVECTOR cross = XMVector3Cross(n, t);
+			float w = (XMVectorGetX(XMVector3Dot(cross, b)) < 0.0f) ? -1.0f : 1.0f;
+
+			vertices[i].tangent[0] = XMVectorGetX(t);
+			vertices[i].tangent[1] = XMVectorGetY(t);
+			vertices[i].tangent[2] = XMVectorGetZ(t);
+			vertices[i].tangent[3] = w;
+		}
+	}
+
 	void ClampMaterialConstants(PmxModelDrawer::MaterialCB& material) noexcept
 	{
 		auto saturateColor = [](float& value) { value = std::clamp(value, 0.0f, 1.0f); };
@@ -322,13 +429,17 @@ void PmxModelDrawer::EnsurePmxResources(const PmxModel* model, const LightSettin
 		return;
 	}
 
-	if (m_vertexUpload && m_vertexUploadMapped)
+	for (int i = 0; i < 2; ++i)
 	{
-		m_vertexUpload->Unmap(0, nullptr);
-		m_vertexUploadMapped = nullptr;
+		if (m_vertexUpload[i] && m_vertexUploadMapped[i])
+		{
+			m_vertexUpload[i]->Unmap(0, nullptr);
+			m_vertexUploadMapped[i] = nullptr;
+		}
+		m_vertexUpload[i] = nullptr;
 	}
+	m_currentUploadBuffer = 0;
 
-	m_vertexUpload = nullptr;
 	m_indexUpload = nullptr;
 	m_pendingVertexUploadRanges.clear();
 	m_indexUploadPending = false;
@@ -370,6 +481,7 @@ void PmxModelDrawer::EnsurePmxResources(const PmxModel* model, const LightSettin
 		pv.addUv2[0] = v.additionalUV[1].x; pv.addUv2[1] = v.additionalUV[1].y; pv.addUv2[2] = v.additionalUV[1].z; pv.addUv2[3] = v.additionalUV[1].w;
 		pv.addUv3[0] = v.additionalUV[2].x; pv.addUv3[1] = v.additionalUV[2].y; pv.addUv3[2] = v.additionalUV[2].z; pv.addUv3[3] = v.additionalUV[2].w;
 		pv.addUv4[0] = v.additionalUV[3].x; pv.addUv4[1] = v.additionalUV[3].y; pv.addUv4[2] = v.additionalUV[3].z; pv.addUv4[3] = v.additionalUV[3].w;
+		pv.tangent[0] = 0.0f; pv.tangent[1] = 0.0f; pv.tangent[2] = 0.0f; pv.tangent[3] = 1.0f;
 
 		for (int i = 0; i < 4; ++i)
 		{
@@ -428,7 +540,8 @@ void PmxModelDrawer::EnsurePmxResources(const PmxModel* model, const LightSettin
 	}
 
 	m_baseVertices = vtx;
-	m_workingVertices = vtx;
+	ComputeVertexTangents(m_baseVertices, inds);
+	m_workingVertices = m_baseVertices;
 	m_morphWeights.resize(model->Morphs().size());
 
 	const size_t vertexCount = vtx.size();
@@ -486,18 +599,22 @@ void PmxModelDrawer::EnsurePmxResources(const PmxModel* model, const LightSettin
 			D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
 			IID_PPV_ARGS(m_pmx.vb.put())));
 
-		DX_CALL(m_ctx->Device()->CreateCommittedResource(
-			&uploadHeapProps, D3D12_HEAP_FLAG_NONE, &bufDesc,
-			D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-			IID_PPV_ARGS(m_vertexUpload.put())));
+		for (int i = 0; i < 2; ++i)
+		{
+			DX_CALL(m_ctx->Device()->CreateCommittedResource(
+				&uploadHeapProps, D3D12_HEAP_FLAG_NONE, &bufDesc,
+				D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+				IID_PPV_ARGS(m_vertexUpload[i].put())));
 
-		void* mappedUpload = nullptr;
-		CD3DX12_RANGE range(0, 0);
-		DX_CALL(m_vertexUpload->Map(0, &range, &mappedUpload));
-		m_vertexUploadMapped = static_cast<uint8_t*>(mappedUpload);
-		std::memcpy(m_vertexUploadMapped, vtx.data(), static_cast<size_t>(vbSize));
+			void* mappedUpload = nullptr;
+			CD3DX12_RANGE range(0, 0);
+			DX_CALL(m_vertexUpload[i]->Map(0, &range, &mappedUpload));
+			m_vertexUploadMapped[i] = static_cast<uint8_t*>(mappedUpload);
+			std::memcpy(m_vertexUploadMapped[i], m_baseVertices.data(), static_cast<size_t>(vbSize));
+		}
 		m_pendingVertexUploadRanges.emplace_back(0, vbSize);
 		m_vertexBufferState = D3D12_RESOURCE_STATE_COPY_DEST;
+		m_currentUploadBuffer = 0;
 
 		m_pmx.vbv.BufferLocation = m_pmx.vb->GetGPUVirtualAddress();
 		m_pmx.vbv.StrideInBytes = sizeof(PmxVsVertex);
@@ -566,12 +683,14 @@ void PmxModelDrawer::EnsurePmxResources(const PmxModel* model, const LightSettin
 		float rimMul, specMul, shadowMul, toonContrastMul;
 		GetMaterialStyleParams(matType, rimMul, specMul, shadowMul, toonContrastMul);
 
-		gm.srvBlockIndex = m_resources->AllocSrvBlock3();
+		gm.srvBlockIndex = m_resources->AllocSrvBlock4();
 
 		uint32_t baseSrv = m_resources->GetDefaultWhiteSrv();
+		std::filesystem::path baseTexPath;
 		if (mat.textureIndex >= 0 && mat.textureIndex < static_cast<int32_t>(texPaths.size()))
 		{
-			baseSrv = m_resources->LoadTextureSrv(texPaths[mat.textureIndex]);
+			baseTexPath = texPaths[mat.textureIndex];
+			baseSrv = m_resources->LoadTextureSrv(baseTexPath);
 		}
 		if (const auto* texture = m_resources->FindTexture(baseSrv))
 		{
@@ -597,6 +716,16 @@ void PmxModelDrawer::EnsurePmxResources(const PmxModel* model, const LightSettin
 			sphereSrv = m_resources->LoadTextureSrv(texPaths[mat.sphereTextureIndex]);
 		}
 		m_resources->CopySrv(gm.srvBlockIndex + 2, sphereSrv);
+
+		uint32_t normalSrv = m_resources->GetDefaultNormalSrv();
+		std::filesystem::path normalPath = FindNormalMapPath(baseTexPath);
+		if (!normalPath.empty())
+		{
+			normalSrv = m_resources->LoadTextureSrv(normalPath);
+			gm.hasNormalMap = true;
+		}
+		gm.normalMapSrv = normalSrv;
+		m_resources->CopySrv(gm.srvBlockIndex + 3, normalSrv);
 
 		const bool isFace = lightSettings.faceMaterialOverridesEnabled && LooksLikeFaceMaterial(mat);
 		if (isFace)
@@ -626,6 +755,15 @@ void PmxModelDrawer::EnsurePmxResources(const PmxModel* model, const LightSettin
 		mcb->textureFactor = { 1.0f, 1.0f, 1.0f, 1.0f };
 		mcb->sphereFactor = { 1.0f, 1.0f, 1.0f, 1.0f };
 		mcb->toonFactor = { 1.0f, 1.0f, 1.0f, 1.0f };
+		mcb->normalFactor = { 1.0f, 1.0f, 1.0f, 1.0f };
+		mcb->normalMapIntensity = lightSettings.normalMapEnabled ? lightSettings.normalMapIntensity : 0.0f;
+
+		gm.rimMul = rimMul;
+		gm.specMul = specMul;
+		gm.shadowMul = shadowMul;
+		gm.toonContrastMul = toonContrastMul;
+		gm.materialType = matType;
+		gm.normalMapIntensity = mcb->normalMapIntensity;
 
 		m_pmx.materials.push_back(gm);
 	}
@@ -663,6 +801,16 @@ void PmxModelDrawer::UpdateMaterialSettings(const LightSettings& lightSettings)
 		MaterialCB* mcb = reinterpret_cast<MaterialCB*>(m_materialCbMapped + mi * m_materialCbStride);
 		mcb->shadowMul = shadowMul;
 		mcb->toonContrastMul = toonContrastMul;
+		mcb->normalMapIntensity = lightSettings.normalMapEnabled ? lightSettings.normalMapIntensity : 0.0f;
+		mcb->rimMul = rimMul;
+		mcb->specMul = specMul;
+		mcb->materialType = matType;
+		m_pmx.materials[mi].rimMul = rimMul;
+		m_pmx.materials[mi].specMul = specMul;
+		m_pmx.materials[mi].shadowMul = shadowMul;
+		m_pmx.materials[mi].toonContrastMul = toonContrastMul;
+		m_pmx.materials[mi].materialType = matType;
+		m_pmx.materials[mi].normalMapIntensity = mcb->normalMapIntensity;
 	}
 
 	m_appliedLightSettings = lightSettings;
@@ -1074,7 +1222,7 @@ void PmxModelDrawer::RecomputeWorkingNormals(const PmxModel& model,
 
 void PmxModelDrawer::UploadWorkingVertices(const VertexDirtySet& vertexDirtySet)
 {
-	if (!m_pmx.vb || !m_vertexUpload || !m_vertexUploadMapped || vertexDirtySet.Empty())
+	if (!m_pmx.vb || !m_vertexUpload[m_currentUploadBuffer] || !m_vertexUploadMapped[m_currentUploadBuffer] || vertexDirtySet.Empty())
 	{
 		return;
 	}
@@ -1101,7 +1249,7 @@ void PmxModelDrawer::UploadWorkingVertices(const VertexDirtySet& vertexDirtySet)
 
 		const UINT64 copyByteCount = std::min(byteCount, m_vertexBufferSizeBytes - byteOffset);
 		std::memcpy(
-			m_vertexUploadMapped + byteOffset,
+			m_vertexUploadMapped[m_currentUploadBuffer] + byteOffset,
 			m_workingVertices.data() + firstVertex,
 			static_cast<size_t>(copyByteCount));
 		m_pendingVertexUploadRanges.emplace_back(byteOffset, copyByteCount);
@@ -1139,6 +1287,14 @@ void PmxModelDrawer::ResetMaterialConstants(size_t materialIndex)
 	cb->textureFactor = { 1.0f, 1.0f, 1.0f, 1.0f };
 	cb->sphereFactor = { 1.0f, 1.0f, 1.0f, 1.0f };
 	cb->toonFactor = { 1.0f, 1.0f, 1.0f, 1.0f };
+	cb->normalFactor = { 1.0f, 1.0f, 1.0f, 1.0f };
+	cb->sphereMode = material.mat.sphereMode;
+	cb->rimMul = material.rimMul;
+	cb->specMul = material.specMul;
+	cb->shadowMul = material.shadowMul;
+	cb->toonContrastMul = material.toonContrastMul;
+	cb->materialType = material.materialType;
+	cb->normalMapIntensity = material.normalMapIntensity;
 }
 
 void PmxModelDrawer::ApplyMaterialOffset(MaterialCB& cb,
@@ -1399,7 +1555,7 @@ void PmxModelDrawer::CommitGpuUploads(ID3D12GraphicsCommandList* cmdList)
 		m_indexUploadPending = false;
 	}
 
-	if (!m_pendingVertexUploadRanges.empty() && m_pmx.vb && m_vertexUpload)
+	if (!m_pendingVertexUploadRanges.empty() && m_pmx.vb && m_vertexUpload[m_currentUploadBuffer])
 	{
 		if (m_vertexBufferState != D3D12_RESOURCE_STATE_COPY_DEST)
 		{
@@ -1422,7 +1578,7 @@ void PmxModelDrawer::CommitGpuUploads(ID3D12GraphicsCommandList* cmdList)
 			cmdList->CopyBufferRegion(
 				m_pmx.vb.get(),
 				byteOffset,
-				m_vertexUpload.get(),
+				m_vertexUpload[m_currentUploadBuffer].get(),
 				byteOffset,
 				clampedByteCount);
 		}
@@ -1434,6 +1590,7 @@ void PmxModelDrawer::CommitGpuUploads(ID3D12GraphicsCommandList* cmdList)
 		cmdList->ResourceBarrier(1, &barrier);
 		m_vertexBufferState = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
 		m_pendingVertexUploadRanges.clear();
+		m_currentUploadBuffer ^= 1;
 	}
 }
 

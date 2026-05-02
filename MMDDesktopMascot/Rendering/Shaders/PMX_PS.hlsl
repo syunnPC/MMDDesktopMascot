@@ -6,6 +6,7 @@ struct PSIn
     float3 viewDir : TEXCOORD3;
     float2 uv : TEXCOORD0;
     float4 addUv1 : TEXCOORD4;
+    float4 worldTangent : TEXCOORD5;
 };
 
 cbuffer SceneCB : register(b0)
@@ -88,12 +89,16 @@ cbuffer Material : register(b1)
     float4 g_textureFactor;
     float4 g_sphereFactor;
     float4 g_toonFactor;
+    float4 g_normalFactor;
+    float g_normalMapIntensity;
+    float3 _pad3;
 };
 
 Texture2D g_base : register(t0);
 Texture2D g_toon : register(t1);
 Texture2D g_sphere : register(t2);
-Texture2D g_shadowMap : register(t3);
+Texture2D g_normalMap : register(t3);
+Texture2D g_shadowMap : register(t4);
 SamplerState g_samp : register(s0);
 SamplerState g_toonSamp : register(s1);
 SamplerComparisonState g_shadowSamp : register(s2);
@@ -201,7 +206,6 @@ float StylizeSelfShadow(float visibility, float2 pixel)
         return visibility;
     }
 
-    // Convert the PCF result into a stable toon band instead of a continuous fade.
     float threshold = saturate(0.5 + g_shadowRampShift * 0.18);
     float softness = max(0.02, g_shadowDeepSoftness * 0.9 + 0.015);
     float jitter = (ScreenStableNoise(pixel) - 0.5) * softness * 0.5;
@@ -222,7 +226,6 @@ float StylizeSpecular(float raw, float stepControl)
 
 float3 ApplySphere(float3 base, float3 sphere, uint mode)
 {
-    // 0: none, 1: multiply, 2: add, 3: subtexture (multiply)
     if (mode == 1)
     {
         return base * sphere;
@@ -240,8 +243,19 @@ float3 ApplySphere(float3 base, float3 sphere, uint mode)
 
 float4 PSMain(PSIn i) : SV_TARGET
 {
-    float3 N = normalize(i.worldNormal);
+    float3 N_base = normalize(i.worldNormal);
     float3 V = normalize(i.viewDir);
+
+    // Normal mapping
+    float3 worldTangent = normalize(i.worldTangent.xyz);
+    float3 worldBitangent = cross(N_base, worldTangent) * i.worldTangent.w;
+    float3x3 TBN = float3x3(worldTangent, worldBitangent, N_base);
+
+    float3 normalTS = g_normalMap.Sample(g_samp, i.uv).rgb;
+    normalTS = normalTS * 2.0f - 1.0f;
+    normalTS.xy *= g_normalMapIntensity * g_normalFactor.xy;
+    normalTS = normalize(normalTS);
+    float3 N = normalize(mul(normalTS, TBN));
 
     float4 texSample = g_base.Sample(g_samp, i.uv);
     float baseAlpha = texSample.a * g_textureFactor.a * g_diffuse.a;
@@ -291,34 +305,32 @@ float4 PSMain(PSIn i) : SV_TARGET
 
     float3 litAlbedo = lerp(midLit, deepShadow, deepMask);
 
-    float3 diff =
-        litAlbedo * (g_lightColor0 * keyIntensity + g_lightColor1 * g_lightInt1 * 0.5);
-
-    float3 ambient = shadowColor * g_ambientMat * (g_ambient + 0.05);
-
     float3 H0 = normalize(L0 + V);
     float3 H1 = normalize(L1 + V);
     float specPowerScale = max(g_specPower, 1.0) / 48.0;
     float sp = max(g_specPowerMat * specPowerScale, 1.0);
-    float rawSpec0 = pow(saturate(dot(N, H0)), sp);
-    float rawSpec1 = pow(saturate(dot(N, H1)), sp);
+    float rawSpec0 = pow(saturate(dot(N_base, H0)), sp);
+    float rawSpec1 = pow(saturate(dot(N_base, H1)), sp);
     float specStep = g_specularStep * g_specMul;
-    float specBand0 =
-        (g_enableToon != 0) ? StylizeSpecular(rawSpec0, specStep) : rawSpec0;
-    float specBand1 =
-        (g_enableToon != 0) ? StylizeSpecular(rawSpec1, specStep) : rawSpec1;
+    float specBand0 = (g_enableToon != 0) ? StylizeSpecular(rawSpec0, specStep) : rawSpec0;
+    float specBand1 = (g_enableToon != 0) ? StylizeSpecular(rawSpec1, specStep) : rawSpec1;
     float3 specColor = g_specularMat * g_specColor;
-    float3 spec =
-        specColor * g_specStrength *
+    float3 spec = specColor * g_specStrength *
         (specBand0 * g_lightColor0 * keyIntensity +
          specBand1 * g_lightColor1 * g_lightInt1 * 0.5);
 
+    float3 diff = litAlbedo *
+        (g_lightColor0 * keyIntensity + g_lightColor1 * g_lightInt1 * 0.5);
+
+    float3 ambient = shadowColor * g_ambientMat * (g_ambient + 0.05);
+
+    // Rim
     float rim = pow(1.0 - saturate(dot(N, V)), 1.5 + g_rimWidth * 2.0);
     float rimBand = smoothstep(g_rimWidth * 0.35, g_rimWidth, rim);
     float3 rimCol = litAlbedo * g_rimIntensity * rimBand;
 
-    // スフィア（ビュー空間法線からUV生成）
-    float3x3 V3 = (float3x3) g_view;
+    // Sphere
+    float3x3 V3 = (float3x3)g_view;
     float3 Nview = normalize(mul(N, V3));
     float2 sphereUV = (g_sphereMode == 3) ? i.addUv1.xy : (Nview.xy * 0.5 + 0.5);
     float3 sphereTex = LinearizeSrgb(g_sphere.Sample(g_samp, sphereUV).rgb) * g_sphereFactor.rgb;

@@ -178,6 +178,14 @@ private:
 	HWND m_physicsGravityXEdit{};
 	HWND m_physicsGravityYEdit{};
 	HWND m_physicsGravityZEdit{};
+	HWND m_physicsKinematicPosThresholdEdit{};
+	HWND m_physicsKinematicRotThresholdEdit{};
+	HWND m_physicsMinVelocityClipEdit{};
+	HWND m_physicsJointStopErpEdit{};
+	HWND m_physicsCcdThresholdScaleEdit{};
+	HWND m_physicsSleepLinearThresholdEdit{};
+	HWND m_physicsSleepAngularThresholdEdit{};
+	HWND m_physicsWritebackAngleThresholdEdit{};
 	int m_physicsAdvancedHeight{ 0 };
 	int m_physicsAdvancedStartY{ 0 };
 	int m_physicsAdvancedEndY{ 0 };

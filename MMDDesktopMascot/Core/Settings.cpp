@@ -430,6 +430,10 @@ namespace
 		{ L"shadowDeepMul", &LightSettings::shadowDeepMul },
 		{ L"faceShadowMul", &LightSettings::faceShadowMul },
 		{ L"faceToonContrastMul", &LightSettings::faceToonContrastMul },
+		{ L"ssaoIntensity", &LightSettings::ssaoIntensity },
+		{ L"bloomIntensity", &LightSettings::bloomIntensity },
+		{ L"exposure", &LightSettings::exposure },
+		{ L"normalMapIntensity", &LightSettings::normalMapIntensity },
 	};
 
 	constexpr IntFieldDesc<LightSettings> kLightIntFields[] = {
@@ -443,10 +447,22 @@ namespace
 		{ L"selfShadowEnabled", &LightSettings::selfShadowEnabled },
 		{ L"outlineEnabled", &LightSettings::outlineEnabled },
 		{ L"faceMaterialOverridesEnabled", &LightSettings::faceMaterialOverridesEnabled },
+		{ L"ssaoEnabled", &LightSettings::ssaoEnabled },
+		{ L"bloomEnabled", &LightSettings::bloomEnabled },
+		{ L"normalMapEnabled", &LightSettings::normalMapEnabled },
+		{ L"filmicToneMapEnabled", &LightSettings::filmicToneMapEnabled },
 	};
 
 	constexpr FloatFieldDesc<PhysicsSettings> kPhysicsFloatFields[] = {
 		{ L"fixedTimeStep", &PhysicsSettings::fixedTimeStep },
+		{ L"kinematicPositionThreshold", &PhysicsSettings::kinematicPositionThreshold },
+		{ L"kinematicRotationThreshold", &PhysicsSettings::kinematicRotationThreshold },
+		{ L"minKinematicVelocityClip", &PhysicsSettings::minKinematicVelocityClip },
+		{ L"jointStopErp", &PhysicsSettings::jointStopErp },
+		{ L"ccdThresholdScale", &PhysicsSettings::ccdThresholdScale },
+		{ L"sleepLinearThreshold", &PhysicsSettings::sleepLinearThreshold },
+		{ L"sleepAngularThreshold", &PhysicsSettings::sleepAngularThreshold },
+		{ L"writebackAngleThresholdDeg", &PhysicsSettings::writebackAngleThresholdDeg },
 	};
 
 	constexpr IntFieldDesc<PhysicsSettings> kPhysicsIntFields[] = {

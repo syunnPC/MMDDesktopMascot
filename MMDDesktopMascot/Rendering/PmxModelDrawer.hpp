@@ -38,6 +38,7 @@ public:
 		float addUv2[4];
 		float addUv3[4];
 		float addUv4[4];
+		float tangent[4]; // XYZ + handedness W
 	};
 
 	struct alignas(16) MaterialCB
@@ -61,6 +62,9 @@ public:
 		DirectX::XMFLOAT4 textureFactor{ 1.0f, 1.0f, 1.0f, 1.0f };
 		DirectX::XMFLOAT4 sphereFactor{ 1.0f, 1.0f, 1.0f, 1.0f };
 		DirectX::XMFLOAT4 toonFactor{ 1.0f, 1.0f, 1.0f, 1.0f };
+		DirectX::XMFLOAT4 normalFactor{ 1.0f, 1.0f, 1.0f, 1.0f };
+		float normalMapIntensity{ 1.0f };
+		float _pad1[3]{};
 	};
 
 	struct alignas(16) BoneCB
@@ -76,6 +80,14 @@ public:
 		bool baseTextureHasTransparency{};
 		bool baseTextureHasTranslucency{};
 		DirectX::XMFLOAT3 localCenter{};
+		uint32_t normalMapSrv{};
+		bool hasNormalMap{};
+		float rimMul = 1.0f;
+		float specMul = 1.0f;
+		float shadowMul = 1.0f;
+		float toonContrastMul = 1.0f;
+		uint32_t materialType = 0;
+		float normalMapIntensity = 1.0f;
 	};
 
 	struct PmxGpu
@@ -208,8 +220,9 @@ private:
 	std::vector<float> m_appliedMorphWeights;
 	std::vector<size_t> m_activeVertexMorphIndices;
 	std::vector<size_t> m_activeMaterialMorphIndices;
-	winrt::com_ptr<ID3D12Resource> m_vertexUpload;
-	uint8_t* m_vertexUploadMapped{};
+	winrt::com_ptr<ID3D12Resource> m_vertexUpload[2];
+	uint8_t* m_vertexUploadMapped[2]{};
+	int m_currentUploadBuffer = 0;
 	winrt::com_ptr<ID3D12Resource> m_indexUpload;
 	UINT64 m_vertexBufferSizeBytes{};
 	UINT64 m_indexBufferSizeBytes{};

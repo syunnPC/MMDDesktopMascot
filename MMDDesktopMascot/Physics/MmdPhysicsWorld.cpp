@@ -37,7 +37,9 @@ namespace
 		const XMFLOAT3& fromPos,
 		const XMFLOAT4& fromRot,
 		const XMFLOAT3& toPos,
-		const XMFLOAT4& toRot)
+		const XMFLOAT4& toRot,
+		float posThresholdSq = 1.0e-12f,
+		float rotThreshold = 1.0e-8f)
 	{
 		const float dx = toPos.x - fromPos.x;
 		const float dy = toPos.y - fromPos.y;
@@ -53,17 +55,18 @@ namespace
 		// Bone-driven kinematic bodies can move only a tiny amount per 120 Hz physics step.
 		// If we filter those deltas too aggressively, colliders lag behind the animation,
 		// then catch up in larger jumps that show up as clipping and jitter.
-		return posDeltaSq > 1.0e-12f || (1.0f - rotDot) > 1.0e-8f;
+		return posDeltaSq > posThresholdSq || (1.0f - rotDot) > rotThreshold;
 	}
 
 	bool HasMeaningfulPositionDelta(
 		const XMFLOAT3& fromPos,
-		const XMFLOAT3& toPos)
+		const XMFLOAT3& toPos,
+		float posThresholdSq = 1.0e-10f)
 	{
 		const float dx = toPos.x - fromPos.x;
 		const float dy = toPos.y - fromPos.y;
 		const float dz = toPos.z - fromPos.z;
-		return (dx * dx + dy * dy + dz * dz) > 1.0e-10f;
+		return (dx * dx + dy * dy + dz * dz) > posThresholdSq;
 	}
 
 	class BindPoseGlobalCache
@@ -1630,6 +1633,9 @@ void MmdPhysicsWorld::InitializeRealBulletWorld(const PmxModel& model)
 		rb->setDamping(linDamping, angDamping);
 		rb->setLinearVelocity(ToBtVector3(b.linearVelocity));
 		rb->setAngularVelocity(ToBtVector3(b.angularVelocity));
+		rb->setSleepingThresholds(
+			std::max(0.0f, m_settings.sleepLinearThreshold),
+			std::max(0.0f, m_settings.sleepAngularThreshold));
 
 		const bool hasBone = (b.boneIndex >= 0 && b.boneIndex < static_cast<int>(model.Bones().size()));
 		if (mass <= 0.0f && hasBone)
@@ -1657,7 +1663,7 @@ void MmdPhysicsWorld::InitializeRealBulletWorld(const PmxModel& model)
 			}
 
 			rb->setCcdSweptSphereRadius(ccdRadius);
-			rb->setCcdMotionThreshold(std::max(1.0e-4f, ccdRadius));
+			rb->setCcdMotionThreshold(std::max(1.0e-4f, ccdRadius * m_settings.ccdThresholdScale));
 		}
 
 		const int groupIndex = std::clamp(b.group, 0, 15);
@@ -1714,7 +1720,7 @@ void MmdPhysicsWorld::InitializeRealBulletWorld(const PmxModel& model)
 		constraint->setAngularUpperLimit(ToBtVector3(j.rotationUpper));
 		for (int axis = 0; axis < 6; ++axis)
 		{
-			constraint->setParam(BT_CONSTRAINT_STOP_ERP, kViewerCompatConstraintStopErp, axis);
+			constraint->setParam(BT_CONSTRAINT_STOP_ERP, m_settings.jointStopErp, axis);
 		}
 
 		for (int axis = 0; axis < 3; ++axis)
@@ -2249,7 +2255,9 @@ void MmdPhysicsWorld::RunRealBulletFixedStep(float fixedStepDt)
 				b.kinematicStartPos,
 				b.kinematicStartRot,
 				b.kinematicTargetPos,
-				b.kinematicTargetRot);
+				b.kinematicTargetRot,
+				m_settings.kinematicPositionThreshold,
+				m_settings.kinematicRotationThreshold);
 			if (movedThisStep)
 			{
 				++movedKinematicCount;
@@ -2258,6 +2266,11 @@ void MmdPhysicsWorld::RunRealBulletFixedStep(float fixedStepDt)
 					maxKinematicPosDelta = kinematicPosDelta;
 					maxKinematicBody = static_cast<int>(i);
 				}
+			}
+			else
+			{
+				b.kinematicTargetPos = b.kinematicStartPos;
+				b.kinematicTargetRot = b.kinematicStartRot;
 			}
 			const btTransform prevT = ToBtTransform(b.kinematicStartPos, b.kinematicStartRot);
 			const btTransform targetT = ToBtTransform(b.kinematicTargetPos, b.kinematicTargetRot);
@@ -2295,7 +2308,8 @@ void MmdPhysicsWorld::RunRealBulletFixedStep(float fixedStepDt)
 
 		const bool movedThisStep = HasMeaningfulPositionDelta(
 			b.kinematicStartPos,
-			b.kinematicTargetPos);
+			b.kinematicTargetPos,
+			m_settings.kinematicPositionThreshold);
 
 		btTransform currentT = rb->getWorldTransform();
 		btTransform prevT = currentT;
@@ -2317,7 +2331,12 @@ void MmdPhysicsWorld::RunRealBulletFixedStep(float fixedStepDt)
 				b.kinematicTargetPos.y - b.kinematicStartPos.y,
 				b.kinematicTargetPos.z - b.kinematicStartPos.z
 			};
-			rb->setLinearVelocity(btVector3(delta.x / dt, delta.y / dt, delta.z / dt));
+			btVector3 vel(delta.x / dt, delta.y / dt, delta.z / dt);
+			if (vel.length() < m_settings.minKinematicVelocityClip)
+			{
+				vel.setValue(0.0f, 0.0f, 0.0f);
+			}
+			rb->setLinearVelocity(vel);
 		}
 		else
 		{
@@ -2680,7 +2699,7 @@ void MmdPhysicsWorld::WriteBackBones(const PmxModel& model, BoneSolver& bones)
 			parentG = XMMatrixTranslationFromVector(Load3(boneDef.position));
 		}
 
-		const XMMATRIX localMat = desiredG * XMMatrixInverse(nullptr, parentG);
+		const 		XMMATRIX localMat = desiredG * XMMatrixInverse(nullptr, parentG);
 
 		XMFLOAT3 t;
 		XMFLOAT4 r;
@@ -2688,6 +2707,23 @@ void MmdPhysicsWorld::WriteBackBones(const PmxModel& model, BoneSolver& bones)
 
 		if (!std::isfinite(t.x) || !std::isfinite(t.y) || !std::isfinite(t.z)) continue;
 		if (!std::isfinite(r.x) || !std::isfinite(r.y) || !std::isfinite(r.z) || !std::isfinite(r.w)) continue;
+
+		if (m_settings.writebackAngleThresholdDeg > 0.0f)
+		{
+			const XMMATRIX currentLocalMat = XMLoadFloat4x4(&bones.GetBoneLocalMatrix(static_cast<size_t>(boneIndex)));
+			XMFLOAT3 currentT{};
+			XMFLOAT4 currentR{};
+			DecomposeTR(currentLocalMat, currentT, currentR);
+			XMVECTOR qCurrent = XMQuaternionNormalize(XMLoadFloat4(&currentR));
+			XMVECTOR qNew = XMQuaternionNormalize(XMLoadFloat4(&r));
+			float dot = std::fabs(XMVectorGetX(XMVector4Dot(qCurrent, qNew)));
+			dot = std::clamp(dot, 0.0f, 1.0f);
+			float angleDeg = 2.0f * std::acos(dot) * (180.0f / XM_PI);
+			if (angleDeg < m_settings.writebackAngleThresholdDeg)
+			{
+				continue;
+			}
+		}
 
 		if (boneIndex >= 0 && static_cast<size_t>(boneIndex) < m_keepTranslationFlags.size() && m_keepTranslationFlags[static_cast<size_t>(boneIndex)])
 		{

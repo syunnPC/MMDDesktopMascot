@@ -36,7 +36,8 @@ SamplerState g_samp : register(s0);
 float4 PSMain(PSIn i) : SV_TARGET
 {
     float alpha = (g_base.Sample(g_samp, i.uv) * g_textureFactor).a * g_diffuse.a;
-    clip(alpha - 0.01f);
+    float alphaThreshold = (g_alphaCutout > 0.5f) ? 0.333f : 0.01f;
+    clip(alpha - alphaThreshold);
 
     float4 c = i.color;
     return float4(c.rgb * c.a, c.a);

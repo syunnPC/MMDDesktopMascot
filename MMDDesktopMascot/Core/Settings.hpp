@@ -72,6 +72,16 @@ struct LightSettings
 	bool faceMaterialOverridesEnabled = true;
 	float faceShadowMul = 0.0f;
 	float faceToonContrastMul = 0.9f;
+
+	// Post-processing settings
+	bool ssaoEnabled = true;
+	float ssaoIntensity = 0.65f;
+	bool bloomEnabled = true;
+	float bloomIntensity = 0.35f;
+	float exposure = 1.0f;
+	bool normalMapEnabled = true;
+	float normalMapIntensity = 1.0f;
+	bool filmicToneMapEnabled = true;
 };
 
 struct PhysicsSettings
@@ -81,6 +91,15 @@ struct PhysicsSettings
 	int warmupSteps{ 60 };
 
 	DirectX::XMFLOAT3 gravity{ 0.0f, -98.0f, 0.0f };
+
+	float kinematicPositionThreshold{ 1.0e-12f };
+	float kinematicRotationThreshold{ 1.0e-8f };
+	float minKinematicVelocityClip{ 1.0e-4f };
+	float jointStopErp{ 0.475f };
+	float ccdThresholdScale{ 1.0f };
+	float sleepLinearThreshold{ 0.1f };
+	float sleepAngularThreshold{ 0.1f };
+	float writebackAngleThresholdDeg{ 0.0f };
 };
 
 bool operator==(const LightSettings& a, const LightSettings& b) noexcept;

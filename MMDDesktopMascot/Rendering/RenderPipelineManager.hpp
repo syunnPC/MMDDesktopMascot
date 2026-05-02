@@ -14,7 +14,10 @@ public:
 	void CreatePmxPipeline(UINT msaaSampleCount, UINT msaaQuality);
 	void CreateEdgePipeline(UINT msaaSampleCount, UINT msaaQuality);
 	void CreateShadowPipeline();
-	void CreateFxaaPipeline();
+	void CreatePostProcessRootSignature();
+	void CreateSsaoPipeline();
+	void CreateBloomPipeline();
+	void CreateToneMapPipeline();
 
 	ID3D12RootSignature* GetPmxRootSignature() const
 	{
@@ -56,13 +59,25 @@ public:
 	{
 		return m_shadowPsoNoCull.get();
 	}
-	ID3D12RootSignature* GetFxaaRootSignature() const
+	ID3D12RootSignature* GetPostProcessRootSignature() const
 	{
-		return m_fxaaRootSig.get();
+		return m_postProcessRootSig.get();
 	}
-	ID3D12PipelineState* GetFxaaPso() const
+	ID3D12PipelineState* GetSsaoPso() const
 	{
-		return m_fxaaPso.get();
+		return m_ssaoPso.get();
+	}
+	ID3D12PipelineState* GetBloomDownsamplePso() const
+	{
+		return m_bloomDownPso.get();
+	}
+	ID3D12PipelineState* GetBloomBlurPso() const
+	{
+		return m_bloomBlurPso.get();
+	}
+	ID3D12PipelineState* GetToneMapPso() const
+	{
+		return m_toneMapPso.get();
 	}
 
 private:
@@ -79,6 +94,9 @@ private:
 	winrt::com_ptr<ID3D12PipelineState> m_shadowPso;
 	winrt::com_ptr<ID3D12PipelineState> m_shadowPsoNoCull;
 
-	winrt::com_ptr<ID3D12RootSignature> m_fxaaRootSig;
-	winrt::com_ptr<ID3D12PipelineState> m_fxaaPso;
+	winrt::com_ptr<ID3D12RootSignature> m_postProcessRootSig;
+	winrt::com_ptr<ID3D12PipelineState> m_ssaoPso;
+	winrt::com_ptr<ID3D12PipelineState> m_bloomDownPso;
+	winrt::com_ptr<ID3D12PipelineState> m_bloomBlurPso;
+	winrt::com_ptr<ID3D12PipelineState> m_toneMapPso;
 };

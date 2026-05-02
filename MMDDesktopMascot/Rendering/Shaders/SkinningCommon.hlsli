@@ -82,26 +82,24 @@ float4 QuaternionConjugate(float4 q)
     return float4(-q.xyz, q.w);
 }
 
-void ApplyLinearSkin(VSIn i, out float3 skinnedPos, out float3 skinnedNrm)
+void ApplyLinearSkin(VSIn i, inout float3 skinnedPos, inout float3 skinnedNrm, inout float3 skinnedTan)
 {
     float4x4 skinMat = GetSkinMatrix(i.boneIndices, i.boneWeights);
-    float4 pos4 = mul(float4(i.pos, 1.0), skinMat);
+    float4 pos4 = mul(float4(skinnedPos, 1.0), skinMat);
     skinnedPos = pos4.xyz;
     float3x3 skinMat3x3 = (float3x3)skinMat;
-    skinnedNrm = normalize(mul(i.nrm, skinMat3x3));
+    skinnedNrm = normalize(mul(skinnedNrm, skinMat3x3));
+    skinnedTan = normalize(mul(skinnedTan, skinMat3x3));
 }
 
-void ApplySdefSkin(VSIn i, out float3 skinnedPos, out float3 skinnedNrm)
+void ApplySdefSkin(VSIn i, inout float3 skinnedPos, inout float3 skinnedNrm, inout float3 skinnedTan)
 {
-    skinnedPos = i.pos;
-    skinnedNrm = i.nrm;
-
     int idx0 = i.boneIndices[0];
     int idx1 = i.boneIndices[1];
 
     if (idx0 < 0 || idx1 < 0 || idx0 >= 1024 || idx1 >= 1024)
     {
-        ApplyLinearSkin(i, skinnedPos, skinnedNrm);
+        ApplyLinearSkin(i, skinnedPos, skinnedNrm, skinnedTan);
         return;
     }
 
@@ -146,17 +144,15 @@ void ApplySdefSkin(VSIn i, out float3 skinnedPos, out float3 skinnedNrm)
     float3 term0 = mul(float4(C0, 1.0), matA4).xyz * w0;
     float3 term1 = mul(float4(C1, 1.0), matB4).xyz * w1;
 
-    float3 rotated = RotateByQuaternion(i.pos - C, q);
+    float3 rotated = RotateByQuaternion(skinnedPos - C, q);
 
     skinnedPos = term0 + term1 + rotated;
-    skinnedNrm = normalize(RotateByQuaternion(i.nrm, q));
+    skinnedNrm = normalize(RotateByQuaternion(skinnedNrm, q));
+    skinnedTan = normalize(RotateByQuaternion(skinnedTan, q));
 }
 
-void ApplyQdefSkin(VSIn i, out float3 skinnedPos, out float3 skinnedNrm)
+void ApplyQdefSkin(VSIn i, inout float3 skinnedPos, inout float3 skinnedNrm, inout float3 skinnedTan)
 {
-    skinnedPos = i.pos;
-    skinnedNrm = i.nrm;
-
     float4 blendedReal = float4(0.0, 0.0, 0.0, 0.0);
     float4 blendedDual = float4(0.0, 0.0, 0.0, 0.0);
     float4 referenceReal = float4(0.0, 0.0, 0.0, 1.0);
@@ -196,7 +192,7 @@ void ApplyQdefSkin(VSIn i, out float3 skinnedPos, out float3 skinnedNrm)
 
     if (!hasReference || totalWeight <= 0.001)
     {
-        ApplyLinearSkin(i, skinnedPos, skinnedNrm);
+        ApplyLinearSkin(i, skinnedPos, skinnedNrm, skinnedTan);
         return;
     }
 
@@ -206,7 +202,7 @@ void ApplyQdefSkin(VSIn i, out float3 skinnedPos, out float3 skinnedNrm)
     const float realLength = length(blendedReal);
     if (realLength <= 1.0e-5)
     {
-        ApplyLinearSkin(i, skinnedPos, skinnedNrm);
+        ApplyLinearSkin(i, skinnedPos, skinnedNrm, skinnedTan);
         return;
     }
 
@@ -217,6 +213,7 @@ void ApplyQdefSkin(VSIn i, out float3 skinnedPos, out float3 skinnedNrm)
     const float4 translationQuat = QuaternionMultiply(blendedDual, QuaternionConjugate(blendedReal));
     const float3 translation = 2.0 * translationQuat.xyz;
 
-    skinnedPos = RotateByQuaternion(i.pos, blendedReal) + translation;
-    skinnedNrm = normalize(RotateByQuaternion(i.nrm, blendedReal));
+    skinnedPos = RotateByQuaternion(skinnedPos, blendedReal) + translation;
+    skinnedNrm = normalize(RotateByQuaternion(skinnedNrm, blendedReal));
+    skinnedTan = normalize(RotateByQuaternion(skinnedTan, blendedReal));
 }

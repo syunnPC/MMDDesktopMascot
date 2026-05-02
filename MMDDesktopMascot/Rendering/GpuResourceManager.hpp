@@ -45,6 +45,7 @@ public:
 
 	uint32_t AllocSrvIndex();
 	uint32_t AllocSrvBlock3();
+	uint32_t AllocSrvBlock4();
 	void CopySrv(uint32_t dstIndex, uint32_t srcIndex);
 
 	uint32_t GetDefaultWhiteSrv() const
@@ -54,6 +55,10 @@ public:
 	uint32_t GetDefaultToonSrv() const
 	{
 		return m_defaultToonSrv;
+	}
+	uint32_t GetDefaultNormalSrv() const
+	{
+		return m_defaultNormalSrv;
 	}
 
 private:
@@ -77,6 +82,7 @@ private:
 		bool generateMips);
 
 	uint32_t CreateWhiteTexture1x1();
+	uint32_t CreateFlatNormalTexture1x1();
 	uint32_t CreateDefaultToonRamp();
 	uint32_t CreateSharedToonRamp(int toonIndex);
 
@@ -100,4 +106,5 @@ private:
 	uint32_t m_nextSrvIndex = 0;
 	uint32_t m_defaultWhiteSrv = 0;
 	uint32_t m_defaultToonSrv = 0;
+	uint32_t m_defaultNormalSrv = 0;
 };

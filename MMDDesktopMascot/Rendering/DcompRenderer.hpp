@@ -173,6 +173,7 @@ private:
     winrt::com_ptr<ID3D12DescriptorHeap> m_dsvHeap;
     winrt::com_ptr<ID3D12Resource> m_depth;
     D3D12_CPU_DESCRIPTOR_HANDLE m_dsvHandle{};
+    D3D12_RESOURCE_STATES m_depthState = D3D12_RESOURCE_STATE_DEPTH_WRITE;
 
 	void CreateDepthBuffer();
 	void CreateSceneBuffers();
@@ -206,14 +207,38 @@ private:
     winrt::com_ptr<ID3D12DescriptorHeap> m_intermediateRtvHeap;
     D3D12_CPU_DESCRIPTOR_HANDLE m_intermediateRtvHandle{};
 
-    winrt::com_ptr<ID3D12DescriptorHeap> m_intermediateSrvHeap;
-    D3D12_CPU_DESCRIPTOR_HANDLE m_intermediateSrvCpuHandle{};
-    D3D12_GPU_DESCRIPTOR_HANDLE m_intermediateSrvGpuHandle{};
     D3D12_RESOURCE_STATES m_intermediateState = D3D12_RESOURCE_STATE_RENDER_TARGET;
 
     void CreateIntermediateResources();
     void ReleaseIntermediateResources();
     void ReportProgress(float value, const wchar_t* msg);
+
+    void CreatePostProcessResources();
+    void ReleasePostProcessResources();
+
+    // Post-process descriptor heap (shader-visible, contains all SRVs/UAVs for compute)
+    winrt::com_ptr<ID3D12DescriptorHeap> m_postProcessHeap;
+    UINT m_postProcessDescriptorSize = 0;
+    enum PostProcessDescriptorIndex
+    {
+        PP_IntermediateSrv = 0,
+        PP_DepthSrv,
+        PP_SsaoUav,
+        PP_SsaoSrv,
+        PP_Bloom0Uav,
+        PP_Bloom0Srv,
+        PP_Bloom1Uav,
+        PP_Bloom1Srv,
+        PP_DescriptorCount
+    };
+
+    winrt::com_ptr<ID3D12Resource> m_ssaoTex;
+    D3D12_RESOURCE_STATES m_ssaoState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+
+    winrt::com_ptr<ID3D12Resource> m_bloomTex[2];
+    D3D12_RESOURCE_STATES m_bloomState[2] = { D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_UNORDERED_ACCESS };
+    UINT m_bloomWidth = 0;
+    UINT m_bloomHeight = 0;
 
     winrt::com_ptr<ID3D12DescriptorHeap> m_shadowDsvHeap;
     D3D12_CPU_DESCRIPTOR_HANDLE m_shadowDsvHandle{};
