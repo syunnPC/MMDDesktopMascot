@@ -159,9 +159,16 @@ bool MmdAnimator::LoadMotion(const std::filesystem::path& vmd)
 		m_paused = false;
 		DirectX::XMStoreFloat4x4(&m_motionTransform, DirectX::XMMatrixIdentity());
 		m_prevFrameForPhysicsValid = false;
-		m_suspendPhysicsForLoopTransition = false;
 		m_resetPhysicsOnNextTick = false;
-		m_physicsWorld->Reset();
+		if (m_transitionActive && HasPhysicsBodies(m_model.get()))
+		{
+			m_suspendPhysicsForLoopTransition = true;
+		}
+		else
+		{
+			m_suspendPhysicsForLoopTransition = false;
+			m_physicsWorld->Reset();
+		}
 		ResetUpdateClock();
 		return true;
 	}
@@ -181,10 +188,17 @@ void MmdAnimator::ClearMotion()
 	m_paused = false;
 	m_hasSkinnedPose = false;
 	m_prevFrameForPhysicsValid = false;
-	m_suspendPhysicsForLoopTransition = false;
 	m_resetPhysicsOnNextTick = false;
 	DirectX::XMStoreFloat4x4(&m_motionTransform, DirectX::XMMatrixIdentity());
-	m_physicsWorld->Reset();
+	if (m_transitionActive && HasPhysicsBodies(m_model.get()))
+	{
+		m_suspendPhysicsForLoopTransition = true;
+	}
+	else
+	{
+		m_suspendPhysicsForLoopTransition = false;
+		m_physicsWorld->Reset();
+	}
 	ResetUpdateClock();
 }
 

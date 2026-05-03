@@ -761,6 +761,11 @@ void MmdPhysicsWorld::BuildFromModel(const PmxModel& model, const BoneSolver& bo
 	{
 		Body& b = m_bodies[i];
 
+		const bool isKinematic = (b.invMass <= 0.0f);
+		const bool isDynPosAdjust =
+			(b.operation == PmxModel::RigidBody::OperationType::DynamicAndPositionAdjust);
+		if (!isKinematic && !isDynPosAdjust) continue;
+
 		DirectX::XMMATRIX rbCurrent = MatrixFromTR(b.position, b.rotation);
 
 		const int boneIndex = b.boneIndex;
