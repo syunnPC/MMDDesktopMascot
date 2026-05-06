@@ -101,6 +101,10 @@ namespace
 	constexpr int ID_PHYS_SLEEP_LINEAR_THRESHOLD = 311;
 	constexpr int ID_PHYS_SLEEP_ANGULAR_THRESHOLD = 312;
 	constexpr int ID_PHYS_WRITEBACK_ANGLE_THRESHOLD = 313;
+	constexpr int ID_PHYS_COLLISION_MASK_COMBO = 314;
+	constexpr int ID_PHYS_GLOBAL_DAMPING_SCALE = 315;
+	constexpr int ID_PHYS_VELOCITY_SETTLE_THRESHOLD = 316;
+	constexpr int ID_PHYS_MIN_ANGULAR_DAMPING = 317;
 
 	constexpr int ID_OK = 200;
 	constexpr int ID_CANCEL = 201;
@@ -1345,6 +1349,36 @@ void SettingsWindow::CreateControls()
 	AddTooltip(label, L"ボーン書き戻し時に無視する最小角度差(度)。0で無効。標準: 0.0。");
 	m_physicsWritebackAngleThresholdEdit = CreateEdit(ID_PHYS_WRITEBACK_ANGLE_THRESHOLD, xPadding + physicsLabelW, y, physicsEditW);
 	AddTooltip(m_physicsWritebackAngleThresholdEdit, L"ボーン書き戻し時に無視する最小角度差(度)。0で無効。標準: 0.0。");
+	y += rowH;
+
+	label = CreateLabel(L"衝突グループ判定:", xPadding, y, physicsLabelW);
+	AddTooltip(label, L"衝突マスクの解釈。Autoは自動判定。モデルによって切り替えると当たり判定が改善する場合がある。");
+	m_physicsCollisionMaskCombo = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
+												   xPadding + physicsLabelW, y, 200, 200, parent, ControlIdToMenuHandle(ID_PHYS_COLLISION_MASK_COMBO), m_hInst, nullptr);
+	SetModernFont(m_physicsCollisionMaskCombo);
+	SetDarkTheme(m_physicsCollisionMaskCombo);
+	SendMessageW(m_physicsCollisionMaskCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"自動判定"));
+	SendMessageW(m_physicsCollisionMaskCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Direct (衝突するグループ指定)"));
+	SendMessageW(m_physicsCollisionMaskCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Inverse (衝突しないグループ指定)"));
+	AddTooltip(m_physicsCollisionMaskCombo, L"衝突マスクの解釈。Autoは自動判定。モデルによって切り替えると当たり判定が改善する場合がある。");
+	y += rowH;
+
+	label = CreateLabel(L"減衰倍率:", xPadding, y, physicsLabelW);
+	AddTooltip(label, L"PMXから読み込んだ減衰値を一律倍率で調整。大きくすると動きが早く収束する。標準: 1.0。");
+	m_physicsGlobalDampingScaleEdit = CreateEdit(ID_PHYS_GLOBAL_DAMPING_SCALE, xPadding + physicsLabelW, y, physicsEditW);
+	AddTooltip(m_physicsGlobalDampingScaleEdit, L"PMXから読み込んだ減衰値を一律倍率で調整。大きくすると動きが早く収束する。標準: 1.0。");
+	y += rowH;
+
+	label = CreateLabel(L"速度ゼロ化閾値:", xPadding, y, physicsLabelW);
+	AddTooltip(label, L"線形/角速度がこの値未満の剛体を強制停止させる。大きくすると振動が早く収まる。標準: 0.001。");
+	m_physicsVelocitySettleThresholdEdit = CreateEdit(ID_PHYS_VELOCITY_SETTLE_THRESHOLD, xPadding + physicsLabelW, y, physicsEditW);
+	AddTooltip(m_physicsVelocitySettleThresholdEdit, L"線形/角速度がこの値未満の剛体を強制停止させる。大きくすると振動が早く収まる。標準: 0.001。");
+	y += rowH;
+
+	label = CreateLabel(L"最小角減衰:", xPadding, y, physicsLabelW);
+	AddTooltip(label, L"すべての動的剛体に適用される角速度減衰の下限値。低い減衰値を持つモデルでも振動を抑える。標準: 0.05。");
+	m_physicsMinAngularDampingEdit = CreateEdit(ID_PHYS_MIN_ANGULAR_DAMPING, xPadding + physicsLabelW, y, physicsEditW);
+	AddTooltip(m_physicsMinAngularDampingEdit, L"すべての動的剛体に適用される角速度減衰の下限値。低い減衰値を持つモデルでも振動を抑える。標準: 0.05。");
 	y += rowH + 20;
 
 	m_physicsAdvancedStartY = y;
@@ -1578,6 +1612,10 @@ void SettingsWindow::LoadPhysicsSettings(const PhysicsSettings& physics)
 	SetEditFloat(m_physicsSleepLinearThresholdEdit, physics.sleepLinearThreshold, 3);
 	SetEditFloat(m_physicsSleepAngularThresholdEdit, physics.sleepAngularThreshold, 3);
 	SetEditFloat(m_physicsWritebackAngleThresholdEdit, physics.writebackAngleThresholdDeg, 2);
+	SendMessageW(m_physicsCollisionMaskCombo, CB_SETCURSEL, static_cast<WPARAM>(std::clamp(physics.collisionMaskSemantics, 0, 2)), 0);
+	SetEditFloat(m_physicsGlobalDampingScaleEdit, physics.globalDampingScale, 3);
+	SetEditFloat(m_physicsVelocitySettleThresholdEdit, physics.velocitySettleThreshold, 6);
+	SetEditFloat(m_physicsMinAngularDampingEdit, physics.minAngularDamping, 3);
 }
 
 void SettingsWindow::LoadLightScalarControls(const LightSettings& light)
@@ -1835,6 +1873,10 @@ void SettingsWindow::BuildPhysicsSettingsFromUi(PhysicsSettings& physics) const
 	physics.sleepLinearThreshold = std::max(0.0f, GetEditBoxFloat(m_physicsSleepLinearThresholdEdit, physics.sleepLinearThreshold));
 	physics.sleepAngularThreshold = std::max(0.0f, GetEditBoxFloat(m_physicsSleepAngularThresholdEdit, physics.sleepAngularThreshold));
 	physics.writebackAngleThresholdDeg = std::max(0.0f, GetEditBoxFloat(m_physicsWritebackAngleThresholdEdit, physics.writebackAngleThresholdDeg));
+	physics.collisionMaskSemantics = std::clamp(static_cast<int>(SendMessageW(m_physicsCollisionMaskCombo, CB_GETCURSEL, 0, 0)), 0, 2);
+	physics.globalDampingScale = std::max(0.0f, GetEditBoxFloat(m_physicsGlobalDampingScaleEdit, physics.globalDampingScale));
+	physics.velocitySettleThreshold = std::max(0.0f, GetEditBoxFloat(m_physicsVelocitySettleThresholdEdit, physics.velocitySettleThreshold));
+	physics.minAngularDamping = std::clamp(GetEditBoxFloat(m_physicsMinAngularDampingEdit, physics.minAngularDamping), 0.0f, 1.0f);
 }
 
 void SettingsWindow::BuildSettingsFromUi(AppSettings& out) const

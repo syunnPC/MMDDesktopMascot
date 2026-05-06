@@ -102,6 +102,13 @@ struct LightSettings
 	int toonDebugView = static_cast<int>(ToonDebugView::Final);
 };
 
+enum class CollisionMaskSemantics : int
+{
+	Auto   = 0,
+	Direct = 1,
+	Inverse = 2
+};
+
 struct PhysicsSettings
 {
 	float fixedTimeStep{ 1.0f / 60.0f };
@@ -118,6 +125,11 @@ struct PhysicsSettings
 	float sleepLinearThreshold{ 0.1f };
 	float sleepAngularThreshold{ 0.1f };
 	float writebackAngleThresholdDeg{ 0.0f };
+
+	int collisionMaskSemantics{ static_cast<int>(CollisionMaskSemantics::Auto) };
+	float globalDampingScale{ 1.0f };
+	float velocitySettleThreshold{ 1.0e-3f };
+	float minAngularDamping{ 0.05f };
 };
 
 bool operator==(const LightSettings& a, const LightSettings& b) noexcept;

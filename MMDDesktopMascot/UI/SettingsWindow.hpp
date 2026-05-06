@@ -187,6 +187,10 @@ private:
 	HWND m_physicsSleepLinearThresholdEdit{};
 	HWND m_physicsSleepAngularThresholdEdit{};
 	HWND m_physicsWritebackAngleThresholdEdit{};
+	HWND m_physicsCollisionMaskCombo{};
+	HWND m_physicsGlobalDampingScaleEdit{};
+	HWND m_physicsVelocitySettleThresholdEdit{};
+	HWND m_physicsMinAngularDampingEdit{};
 	int m_physicsAdvancedHeight{ 0 };
 	int m_physicsAdvancedStartY{ 0 };
 	int m_physicsAdvancedEndY{ 0 };

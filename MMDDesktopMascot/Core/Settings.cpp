@@ -472,11 +472,15 @@ namespace
 		{ L"sleepLinearThreshold", &PhysicsSettings::sleepLinearThreshold },
 		{ L"sleepAngularThreshold", &PhysicsSettings::sleepAngularThreshold },
 		{ L"writebackAngleThresholdDeg", &PhysicsSettings::writebackAngleThresholdDeg },
+		{ L"globalDampingScale", &PhysicsSettings::globalDampingScale },
+		{ L"velocitySettleThreshold", &PhysicsSettings::velocitySettleThreshold },
+		{ L"minAngularDamping", &PhysicsSettings::minAngularDamping },
 	};
 
 	constexpr IntFieldDesc<PhysicsSettings> kPhysicsIntFields[] = {
 		{ L"maxSubSteps", &PhysicsSettings::maxSubSteps },
 		{ L"warmupSteps", &PhysicsSettings::warmupSteps },
+		{ L"collisionMaskSemantics", &PhysicsSettings::collisionMaskSemantics },
 	};
 
 	constexpr IntFieldDesc<AppSettings> kAppIntFields[] = {

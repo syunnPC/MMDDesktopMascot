@@ -452,25 +452,58 @@ namespace
 
 		outDirectPairCount = countAcceptedPairs(true);
 		outInversePairCount = countAcceptedPairs(false);
-		if (outDirectPairCount != outInversePairCount)
-		{
-			return outDirectPairCount > outInversePairCount;
-		}
 
 		size_t fullMaskCount = 0;
 		size_t zeroMaskCount = 0;
+		size_t selfGroupSetCount = 0;
+		size_t selfGroupClearCount = 0;
+		size_t bodyCount = 0;
 		for (const auto& rigidBody : rigidBodies)
 		{
 			if (rigidBody.collisionGroupMask == 0xffffu) ++fullMaskCount;
 			if (rigidBody.collisionGroupMask == 0x0000u) ++zeroMaskCount;
+
+			const uint16_t ownBit = ToCollisionGroupBit(rigidBody.groupIndex);
+			if ((rigidBody.collisionGroupMask & ownBit) != 0)
+				++selfGroupSetCount;
+			else
+				++selfGroupClearCount;
+			++bodyCount;
 		}
 		for (const auto& softBody : softBodies)
 		{
 			if (softBody.collisionGroupMask == 0xffffu) ++fullMaskCount;
 			if (softBody.collisionGroupMask == 0x0000u) ++zeroMaskCount;
+
+			const uint16_t ownBit = ToCollisionGroupBit(softBody.groupIndex);
+			if ((softBody.collisionGroupMask & ownBit) != 0)
+				++selfGroupSetCount;
+			else
+				++selfGroupClearCount;
+			++bodyCount;
 		}
 
-		return fullMaskCount >= zeroMaskCount;
+		if (bodyCount > 0 && selfGroupClearCount > selfGroupSetCount * 2)
+		{
+			return true;
+		}
+
+		if (outDirectPairCount != outInversePairCount)
+		{
+			return outDirectPairCount > outInversePairCount;
+		}
+
+		if (fullMaskCount != zeroMaskCount)
+		{
+			return fullMaskCount >= zeroMaskCount;
+		}
+
+		if (bodyCount > 0 && selfGroupSetCount != selfGroupClearCount)
+		{
+			return selfGroupClearCount > selfGroupSetCount;
+		}
+
+		return false;
 	}
 }
 
@@ -568,11 +601,27 @@ void MmdPhysicsWorld::BuildFromModel(const PmxModel& model, const BoneSolver& bo
 	{
 		uint64_t directPairCount = 0;
 		uint64_t inversePairCount = 0;
-		const bool resolvedDirectMaskSemantics = ResolveDirectCollisionMaskSemantics(
-			rbDefs,
-			softBodyDefs,
-			directPairCount,
-			inversePairCount);
+
+		const int semanticsSetting = m_settings.collisionMaskSemantics;
+		bool resolvedDirectMaskSemantics = false;
+
+		if (semanticsSetting == static_cast<int>(CollisionMaskSemantics::Direct))
+		{
+			resolvedDirectMaskSemantics = true;
+		}
+		else if (semanticsSetting == static_cast<int>(CollisionMaskSemantics::Inverse))
+		{
+			resolvedDirectMaskSemantics = false;
+		}
+		else
+		{
+			resolvedDirectMaskSemantics = ResolveDirectCollisionMaskSemantics(
+				rbDefs,
+				softBodyDefs,
+				directPairCount,
+				inversePairCount);
+		}
+
 		m_useDirectCollisionMaskSemantics = resolvedDirectMaskSemantics;
 
 		std::ostringstream oss;
@@ -580,6 +629,8 @@ void MmdPhysicsWorld::BuildFromModel(const PmxModel& model, const BoneSolver& bo
 			<< (m_useDirectCollisionMaskSemantics ? "collideMask(pmx)" : "nonCollideMask(~pmx)")
 			<< " groupIndexBase=zeroBased"
 			<< " resolvedDirect=" << (resolvedDirectMaskSemantics ? 1 : 0)
+			<< " setting=" << (semanticsSetting == static_cast<int>(CollisionMaskSemantics::Auto) ? "Auto" :
+				(semanticsSetting == static_cast<int>(CollisionMaskSemantics::Direct) ? "Direct" : "Inverse"))
 			<< " directBetter=" << ((directPairCount > inversePairCount) ? 1 : 0)
 			<< " directPairs=" << directPairCount
 			<< " inversePairs=" << inversePairCount;
@@ -1577,6 +1628,7 @@ void MmdPhysicsWorld::InitializeRealBulletWorld(const PmxModel& model)
 	solverInfo.m_splitImpulse = 1;
 	solverInfo.m_splitImpulsePenetrationThreshold = -0.02f;
 	solverInfo.m_numIterations = std::max(solverInfo.m_numIterations, 30);
+	solverInfo.m_restitutionVelocityThreshold = 0.5f;
 
 	const auto& rbDefs = model.RigidBodies();
 	const float collisionScale = 1.0f;
@@ -1643,12 +1695,16 @@ void MmdPhysicsWorld::InitializeRealBulletWorld(const PmxModel& model)
 
 		float linDamping = std::clamp(def ? def->linearDamping : b.linearDamping, 0.0f, 1.0f);
 		float angDamping = std::clamp(def ? def->angularDamping : b.angularDamping, 0.0f, 1.0f);
+		linDamping *= m_settings.globalDampingScale;
+		angDamping = std::max(angDamping * m_settings.globalDampingScale, m_settings.minAngularDamping);
 		rb->setDamping(linDamping, angDamping);
 		rb->setLinearVelocity(ToBtVector3(b.linearVelocity));
 		rb->setAngularVelocity(ToBtVector3(b.angularVelocity));
 		rb->setSleepingThresholds(
 			std::max(0.0f, m_settings.sleepLinearThreshold),
 			std::max(0.0f, m_settings.sleepAngularThreshold));
+
+		rb->setContactStiffnessAndDamping(2000.0f, 20.0f);
 
 		const bool hasBone = (b.boneIndex >= 0 && b.boneIndex < static_cast<int>(model.Bones().size()));
 		if (mass <= 0.0f && hasBone)
@@ -2399,6 +2455,60 @@ void MmdPhysicsWorld::RunRealBulletFixedStep(float fixedStepDt)
 		b.linearVelocity = ToXmFloat3(rb->getLinearVelocity());
 		b.angularVelocity = ToXmFloat3(rb->getAngularVelocity());
 		b.hadContactThisStep = false;
+
+		if (b.invMass > 0.0f)
+		{
+			const float settleThreshold = std::max(0.0f, m_settings.velocitySettleThreshold);
+			const float linSpeed = Length3(Load3(b.linearVelocity));
+			const float angSpeed = Length3(Load3(b.angularVelocity));
+
+			const bool isDynPosAdjust =
+				(b.operation == PmxModel::RigidBody::OperationType::DynamicAndPositionAdjust);
+
+			if (isDynPosAdjust)
+			{
+				const float kdx = b.kinematicTargetPos.x - b.kinematicStartPos.x;
+				const float kdy = b.kinematicTargetPos.y - b.kinematicStartPos.y;
+				const float kdz = b.kinematicTargetPos.z - b.kinematicStartPos.z;
+				const float posDeltaSq = kdx * kdx + kdy * kdy + kdz * kdz;
+
+				if (posDeltaSq < 1.0e-10f && angSpeed < 0.5f)
+				{
+					const float decay = std::max(0.0f, 1.0f - fixedStepDt * 8.0f);
+					const float newAngSpeed = angSpeed * decay;
+					if (newAngSpeed < settleThreshold)
+					{
+						b.angularVelocity = { 0.0f, 0.0f, 0.0f };
+						rb->setAngularVelocity(btVector3(0.0f, 0.0f, 0.0f));
+					}
+					else
+					{
+						const float scale = newAngSpeed / std::max(angSpeed, 1.0e-10f);
+						b.angularVelocity.x *= scale;
+						b.angularVelocity.y *= scale;
+						b.angularVelocity.z *= scale;
+						rb->setAngularVelocity(ToBtVector3(b.angularVelocity));
+					}
+				}
+				else if (posDeltaSq < 1.0e-10f && angSpeed >= 0.5f && angSpeed < 2.0f)
+				{
+					const float decay = std::max(0.0f, 1.0f - fixedStepDt * 3.0f);
+					const float scale = 1.0f - (1.0f - decay) * ((angSpeed - 0.5f) / 1.5f);
+					b.angularVelocity.x *= scale;
+					b.angularVelocity.y *= scale;
+					b.angularVelocity.z *= scale;
+					rb->setAngularVelocity(ToBtVector3(b.angularVelocity));
+				}
+			}
+
+			if (linSpeed < settleThreshold && angSpeed < settleThreshold)
+			{
+				b.linearVelocity = { 0.0f, 0.0f, 0.0f };
+				b.angularVelocity = { 0.0f, 0.0f, 0.0f };
+				rb->setLinearVelocity(btVector3(0.0f, 0.0f, 0.0f));
+				rb->setAngularVelocity(btVector3(0.0f, 0.0f, 0.0f));
+			}
+		}
 	}
 
 	if (mmd::physics::debuglog::IsEnabled())
