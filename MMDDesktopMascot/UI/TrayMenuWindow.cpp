@@ -1069,7 +1069,7 @@ void TrayMenuWindow::DrawContents(HDC hdc)
 	RECT clipRc = rc;
 	clipRc.top = m_headerHeight;
 	HRGN hRgn = CreateRectRgnIndirect(&clipRc);
-	SelectClipRgn(hdc, hRgn);
+	HRGN oldRgn = static_cast<HRGN>(SelectObject(hdc, hRgn));
 
 	// 2. アイテムを描画
 	for (size_t i = 0; i < m_layout.size(); ++i)
@@ -1084,7 +1084,7 @@ void TrayMenuWindow::DrawContents(HDC hdc)
 		DrawItem(hdc, item, -m_scrollOffset);
 	}
 
-	SelectClipRgn(hdc, nullptr);
+	SelectObject(hdc, oldRgn);
 	DeleteObject(hRgn);
 
 	if (m_maxScroll > 0)

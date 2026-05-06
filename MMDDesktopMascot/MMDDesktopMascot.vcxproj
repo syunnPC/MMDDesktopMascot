@@ -50,11 +50,12 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>$(MSBuildProjectDirectory)\..\x64\Release\</OutDir>
-    <BulletLibrarySuffix></BulletLibrarySuffix>
+    <BulletLibrarySuffix>
+    </BulletLibrarySuffix>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <WarningLevel>Level3</WarningLevel>
+      <WarningLevel>Level4</WarningLevel>
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
@@ -65,6 +66,9 @@
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <FloatingPointModel>Fast</FloatingPointModel>
       <AdditionalIncludeDirectories>$(ProjectDir)Core;$(ProjectDir)Common;$(ProjectDir)Model;$(ProjectDir)Animation;$(ProjectDir)Physics;$(ProjectDir)Rendering;$(ProjectDir)Rendering\ThirdParty;$(ProjectDir)UI;$(ProjectDir)Platform;$(ProjectDir)..\external\bullet3\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <TreatAngleIncludeAsExternal>true</TreatAngleIncludeAsExternal>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <TreatWarningAsError>true</TreatWarningAsError>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -97,6 +101,9 @@
       <FloatingPointModel>Fast</FloatingPointModel>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <AdditionalIncludeDirectories>$(ProjectDir)Core;$(ProjectDir)Common;$(ProjectDir)Model;$(ProjectDir)Animation;$(ProjectDir)Physics;$(ProjectDir)Rendering;$(ProjectDir)Rendering\ThirdParty;$(ProjectDir)UI;$(ProjectDir)Platform;$(ProjectDir)..\external\bullet3\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <TreatAngleIncludeAsExternal>true</TreatAngleIncludeAsExternal>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <TreatWarningAsError>true</TreatWarningAsError>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -148,6 +155,9 @@
     <None Include="Rendering\Shaders\SkinningCommon.hlsli">
       <FileType>Document</FileType>
     </None>
+    <None Include="Rendering\Shaders\ToonComposite_PS.hlsl">
+      <FileType>Document</FileType>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Core\App.cpp" />
@@ -169,6 +179,7 @@
     <ClCompile Include="Rendering\DcompRenderer.cpp" />
     <ClCompile Include="Rendering\Dx12Context.cpp" />
     <ClCompile Include="Rendering\GpuResourceManager.cpp" />
+    <ClCompile Include="Rendering\MaterialToonConfig.cpp" />
     <ClCompile Include="Rendering\PmxModelDrawer.cpp" />
     <ClCompile Include="Rendering\RenderPipelineManager.cpp" />
     <ClCompile Include="Rendering\WicTexture.cpp" />
@@ -201,6 +212,7 @@
     <ClInclude Include="Rendering\DcompRenderer.hpp" />
     <ClInclude Include="Rendering\Dx12Context.hpp" />
     <ClInclude Include="Rendering\GpuResourceManager.hpp" />
+    <ClInclude Include="Rendering\MaterialToonConfig.hpp" />
     <ClInclude Include="Rendering\PmxModelDrawer.hpp" />
     <ClInclude Include="Rendering\RenderPipelineManager.hpp" />
     <ClInclude Include="Rendering\WicTexture.hpp" />
@@ -253,4 +265,3 @@
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
 </Project>
-

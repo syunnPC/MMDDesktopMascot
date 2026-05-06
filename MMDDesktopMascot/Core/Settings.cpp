@@ -182,7 +182,11 @@ namespace
 		{
 			return std::stof(s);
 		}
-		catch (...)
+		catch (const std::invalid_argument&)
+		{
+			return defaultVal;
+		}
+		catch (const std::out_of_range&)
 		{
 			return defaultVal;
 		}
@@ -201,7 +205,11 @@ namespace
 		{
 			return std::stoi(s);
 		}
-		catch (...)
+		catch (const std::invalid_argument&)
+		{
+			return defaultVal;
+		}
+		catch (const std::out_of_range&)
 		{
 			return defaultVal;
 		}
@@ -440,6 +448,7 @@ namespace
 		{ L"antiAliasingMode", &LightSettings::antiAliasingMode },
 		{ L"msaaSampleCount", &LightSettings::msaaSampleCount },
 		{ L"shadowMapSize", &LightSettings::shadowMapSize },
+		{ L"toonDebugView", &LightSettings::toonDebugView },
 	};
 
 	constexpr BoolFieldDesc<LightSettings> kLightBoolFields[] = {
@@ -824,7 +833,10 @@ void SettingsManager::Save(const std::filesystem::path& baseDir,
 	const auto path = SettingsPath(baseDir);
 	std::wostringstream output;
 	WriteAppSettings(output, baseDir, settings);
-	WriteUtf8File(path, output.str());
+	if (!WriteUtf8File(path, output.str()))
+	{
+		OutputDebugStringW(L"SettingsManager::Save: WriteUtf8File failed.\n");
+	}
 }
 
 bool SettingsManager::HasPreset(const std::filesystem::path& baseDir, const std::filesystem::path& modelPath)
@@ -852,7 +864,10 @@ void SettingsManager::SavePreset(const std::filesystem::path& baseDir,
 	output << L"; Preset for " << modelPath.filename().wstring() << L"\n";
 	WriteLightSettings(output, lightSettings);
 	WritePhysicsSettings(output, physicsSettings);
-	WriteUtf8File(path, output.str());
+	if (!WriteUtf8File(path, output.str()))
+	{
+		OutputDebugStringW(L"SettingsManager::SavePreset: WriteUtf8File failed.\n");
+	}
 }
 
 bool SettingsManager::LoadPreset(const std::filesystem::path& baseDir,

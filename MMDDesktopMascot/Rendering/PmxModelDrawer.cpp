@@ -3,6 +3,7 @@
 #include "d3dx12.h"
 #include "ExceptionHelper.hpp"
 #include "DebugUtil.hpp"
+#include "MaterialToonConfig.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -114,6 +115,113 @@ namespace
 				outRimMul = 0.20f; outSpecMul = 1.20f; outShadowMul = 0.85f; outToonContrastMul = 1.00f; break;
 			case 5:
 				outRimMul = 1.10f; outSpecMul = 1.00f; outShadowMul = 1.00f; outToonContrastMul = 1.00f; break;
+		}
+	}
+
+	void ApplyMaterialOverride(
+		const MaterialToonOverride* override,
+		PmxModelDrawer::PmxGpuMaterial& gm,
+		uint32_t& materialType,
+		float& rimMul,
+		float& specMul,
+		float& shadowMul,
+		float& toonContrastMul,
+		float& edgeSize)
+	{
+		(void)shadowMul;
+		(void)toonContrastMul;
+		if (!override)
+		{
+			return;
+		}
+
+		if (override->hasClass)
+		{
+			materialType = override->materialClass;
+			GetMaterialStyleParams(materialType, rimMul, specMul, shadowMul, toonContrastMul);
+		}
+		if (override->hasSpecularScale)
+		{
+			specMul = override->specularScale;
+		}
+		if (override->disableSpecular)
+		{
+			specMul = 0.0f;
+		}
+		if (override->hairBandSpecular)
+		{
+			materialType = 2;
+		}
+		if (override->hasShadowColor)
+		{
+			gm.shadowColorOverride = {
+				override->shadowColor.x,
+				override->shadowColor.y,
+				override->shadowColor.z,
+				std::clamp(override->shadowColorWeight, 0.0f, 1.0f)
+			};
+		}
+		if (override->hasRimMask)
+		{
+			gm.toonParams0.x = override->rimMask;
+		}
+		if (override->hasSkinLightInfluence)
+		{
+			gm.toonParams0.y = override->skinLightInfluence;
+		}
+		if (override->hasHairSpecCenter)
+		{
+			gm.toonParams0.z = override->hairSpecCenter;
+		}
+		if (override->hasHairSpecWidth)
+		{
+			gm.toonParams0.w = override->hairSpecWidth;
+		}
+		if (override->hasHairSpecIntensity)
+		{
+			gm.toonParams1.x = override->hairSpecIntensity;
+		}
+		if (override->hasSpecularScale || override->disableSpecular)
+		{
+			gm.toonParams1.y = specMul;
+		}
+		if (override->hasShadowHueShift)
+		{
+			gm.toonParams1.z = override->shadowHueShift;
+		}
+		if (override->hasShadowSaturationScale)
+		{
+			gm.toonParams1.w = override->shadowSaturationScale;
+		}
+		if (override->hasShadowValueScale)
+		{
+			gm.toonParams2.x = override->shadowValueScale;
+		}
+		if (override->hasEdgeColor)
+		{
+			gm.mat.edgeColor[0] = override->edgeColor.x;
+			gm.mat.edgeColor[1] = override->edgeColor.y;
+			gm.mat.edgeColor[2] = override->edgeColor.z;
+			gm.mat.edgeColor[3] = override->edgeColor.w;
+		}
+		if (override->hasEdgeSize)
+		{
+			edgeSize = std::max(0.0f, override->edgeSize);
+			gm.mat.edgeSize = edgeSize;
+		}
+		if (override->hasEdgeEnabled)
+		{
+			gm.edgeEnabled = override->edgeEnabled;
+			gm.edgeEnabledOverridesPmxFlag = true;
+			if (!override->edgeEnabled)
+			{
+				edgeSize = 0.0f;
+				gm.mat.edgeSize = 0.0f;
+			}
+		}
+		if (override->hasAlphaCutout)
+		{
+			gm.alphaCutoutOverride = override->alphaCutout ? 1.0f : 0.0f;
 		}
 	}
 
@@ -393,6 +501,10 @@ namespace
 		saturateColor(material.edgeColor.y);
 		saturateColor(material.edgeColor.z);
 		saturateColor(material.edgeColor.w);
+		saturateColor(material.shadowColorOverride.x);
+		saturateColor(material.shadowColorOverride.y);
+		saturateColor(material.shadowColorOverride.z);
+		saturateColor(material.shadowColorOverride.w);
 
 		clampNonNegative(material.textureFactor.x);
 		clampNonNegative(material.textureFactor.y);
@@ -406,7 +518,17 @@ namespace
 		clampNonNegative(material.toonFactor.y);
 		clampNonNegative(material.toonFactor.z);
 		clampNonNegative(material.toonFactor.w);
+		saturateColor(material.materialIdNormalized);
+		saturateColor(material.edgeEnabled);
 		material.edgeSize = std::max(0.0f, material.edgeSize);
+		material.toonParams0.x = std::clamp(material.toonParams0.x, -1.0f, 1.0f);
+		material.toonParams0.y = std::clamp(material.toonParams0.y, -1.0f, 1.0f);
+		material.toonParams0.w = std::max(0.001f, material.toonParams0.w);
+		material.toonParams1.x = std::max(0.0f, material.toonParams1.x);
+		material.toonParams1.y = std::max(-1.0f, material.toonParams1.y);
+		material.toonParams1.w = std::max(0.0f, material.toonParams1.w);
+		material.toonParams2.x = std::max(0.0f, material.toonParams2.x);
+		saturateColor(material.toonParams2.y);
 	}
 }
 
@@ -460,6 +582,7 @@ void PmxModelDrawer::EnsurePmxResources(const PmxModel* model, const LightSettin
 	const auto& inds = model->Indices();
 	const auto& mats = model->Materials();
 	const auto& texPaths = model->TexturePaths();
+	const MaterialToonConfig toonConfig = MaterialToonConfig::LoadForModel(model->Path());
 
 	std::vector<PmxVsVertex> vtx;
 	vtx.reserve(verts.size());
@@ -671,6 +794,7 @@ void PmxModelDrawer::EnsurePmxResources(const PmxModel* model, const LightSettin
 		const auto& mat = mats[mi];
 		PmxGpuMaterial gm{};
 		gm.mat = mat;
+		const MaterialToonOverride* materialOverride = toonConfig.FindOverride(mat);
 
 		float edgeSize = mat.edgeSize;
 		if (IsEyeOrLashMaterial(mat, texPaths))
@@ -682,8 +806,9 @@ void PmxModelDrawer::EnsurePmxResources(const PmxModel* model, const LightSettin
 		uint32_t matType = GuessMaterialType(mat);
 		float rimMul, specMul, shadowMul, toonContrastMul;
 		GetMaterialStyleParams(matType, rimMul, specMul, shadowMul, toonContrastMul);
+		ApplyMaterialOverride(materialOverride, gm, matType, rimMul, specMul, shadowMul, toonContrastMul, edgeSize);
 
-		gm.srvBlockIndex = m_resources->AllocSrvBlock4();
+		gm.srvBlockIndex = m_resources->AllocSrvBlock5();
 
 		uint32_t baseSrv = m_resources->GetDefaultWhiteSrv();
 		std::filesystem::path baseTexPath;
@@ -727,6 +852,18 @@ void PmxModelDrawer::EnsurePmxResources(const PmxModel* model, const LightSettin
 		gm.normalMapSrv = normalSrv;
 		m_resources->CopySrv(gm.srvBlockIndex + 3, normalSrv);
 
+		uint32_t hairSpecMaskSrv = m_resources->GetDefaultWhiteSrv();
+		if (materialOverride && materialOverride->hasHairSpecMask)
+		{
+			std::filesystem::path maskPath = materialOverride->hairSpecMask;
+			if (maskPath.is_relative())
+			{
+				maskPath = model->Path().parent_path() / maskPath;
+			}
+			hairSpecMaskSrv = m_resources->LoadTextureSrv(maskPath);
+		}
+		m_resources->CopySrv(gm.srvBlockIndex + 4, hairSpecMaskSrv);
+
 		const bool isFace = lightSettings.faceMaterialOverridesEnabled && LooksLikeFaceMaterial(mat);
 		if (isFace)
 		{
@@ -757,6 +894,20 @@ void PmxModelDrawer::EnsurePmxResources(const PmxModel* model, const LightSettin
 		mcb->toonFactor = { 1.0f, 1.0f, 1.0f, 1.0f };
 		mcb->normalFactor = { 1.0f, 1.0f, 1.0f, 1.0f };
 		mcb->normalMapIntensity = lightSettings.normalMapEnabled ? lightSettings.normalMapIntensity : 0.0f;
+		mcb->materialIdNormalized =
+			(mats.size() > 1)
+			? static_cast<float>(mi) / static_cast<float>(mats.size() - 1)
+			: 0.0f;
+		const bool edgeEnabled = gm.edgeEnabledOverridesPmxFlag ? gm.edgeEnabled : (gm.edgeEnabled && mat.ShouldDrawEdge());
+		mcb->edgeEnabled = edgeEnabled ? 1.0f : 0.0f;
+		mcb->shadowColorOverride = gm.shadowColorOverride;
+		mcb->toonParams0 = gm.toonParams0;
+		mcb->toonParams1 = gm.toonParams1;
+		mcb->toonParams2 = gm.toonParams2;
+		if (gm.alphaCutoutOverride >= 0.0f)
+		{
+			mcb->alphaCutout = gm.alphaCutoutOverride;
+		}
 
 		gm.rimMul = rimMul;
 		gm.specMul = specMul;
@@ -764,6 +915,7 @@ void PmxModelDrawer::EnsurePmxResources(const PmxModel* model, const LightSettin
 		gm.toonContrastMul = toonContrastMul;
 		gm.materialType = matType;
 		gm.normalMapIntensity = mcb->normalMapIntensity;
+		gm.edgeEnabled = (mcb->edgeEnabled > 0.5f);
 
 		m_pmx.materials.push_back(gm);
 	}
@@ -788,9 +940,13 @@ void PmxModelDrawer::UpdateMaterialSettings(const LightSettings& lightSettings)
 	{
 		auto& gm = m_pmx.materials[mi];
 
-		uint32_t matType = GuessMaterialType(gm.mat);
+		uint32_t matType = gm.materialType;
 		float rimMul, specMul, shadowMul, toonContrastMul;
 		GetMaterialStyleParams(matType, rimMul, specMul, shadowMul, toonContrastMul);
+		if (gm.toonParams1.y >= 0.0f)
+		{
+			specMul = gm.toonParams1.y;
+		}
 
 		if (lightSettings.faceMaterialOverridesEnabled && LooksLikeFaceMaterial(gm.mat))
 		{
@@ -805,6 +961,10 @@ void PmxModelDrawer::UpdateMaterialSettings(const LightSettings& lightSettings)
 		mcb->rimMul = rimMul;
 		mcb->specMul = specMul;
 		mcb->materialType = matType;
+		mcb->shadowColorOverride = gm.shadowColorOverride;
+		mcb->toonParams0 = gm.toonParams0;
+		mcb->toonParams1 = gm.toonParams1;
+		mcb->toonParams2 = gm.toonParams2;
 		m_pmx.materials[mi].rimMul = rimMul;
 		m_pmx.materials[mi].specMul = specMul;
 		m_pmx.materials[mi].shadowMul = shadowMul;
@@ -1284,6 +1444,10 @@ void PmxModelDrawer::ResetMaterialConstants(size_t materialIndex)
 	cb->edgeColor = { material.mat.edgeColor[0], material.mat.edgeColor[1], material.mat.edgeColor[2], material.mat.edgeColor[3] };
 	cb->edgeSize = material.mat.edgeSize;
 	cb->alphaCutout = (material.baseTextureHasTransparency && !material.baseTextureHasTranslucency) ? 1.0f : 0.0f;
+	if (material.alphaCutoutOverride >= 0.0f)
+	{
+		cb->alphaCutout = material.alphaCutoutOverride;
+	}
 	cb->textureFactor = { 1.0f, 1.0f, 1.0f, 1.0f };
 	cb->sphereFactor = { 1.0f, 1.0f, 1.0f, 1.0f };
 	cb->toonFactor = { 1.0f, 1.0f, 1.0f, 1.0f };
@@ -1295,6 +1459,18 @@ void PmxModelDrawer::ResetMaterialConstants(size_t materialIndex)
 	cb->toonContrastMul = material.toonContrastMul;
 	cb->materialType = material.materialType;
 	cb->normalMapIntensity = material.normalMapIntensity;
+	cb->materialIdNormalized =
+		(m_pmx.materials.size() > 1)
+		? static_cast<float>(materialIndex) / static_cast<float>(m_pmx.materials.size() - 1)
+		: 0.0f;
+	const bool edgeEnabled = material.edgeEnabledOverridesPmxFlag
+		? material.edgeEnabled
+		: (material.edgeEnabled && material.mat.ShouldDrawEdge());
+	cb->edgeEnabled = edgeEnabled ? 1.0f : 0.0f;
+	cb->shadowColorOverride = material.shadowColorOverride;
+	cb->toonParams0 = material.toonParams0;
+	cb->toonParams1 = material.toonParams1;
+	cb->toonParams2 = material.toonParams2;
 }
 
 void PmxModelDrawer::ApplyMaterialOffset(MaterialCB& cb,

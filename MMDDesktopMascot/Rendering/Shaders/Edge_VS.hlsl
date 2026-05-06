@@ -196,7 +196,9 @@ PSIn VSMain(VSIn i)
     o.pos.xy += clipOffset;
 
     float4 col = g_edgeColor;
-    col.a = saturate(col.a * lerp(0.2, 1.0, rimWeight) * max(g_outlineOpacityScale, 0.0));
+    float authoredAlpha = saturate(col.a);
+    float silhouetteAlpha = lerp(0.72, 1.0, rimWeight);
+    col.a = saturate(max(authoredAlpha, 0.85) * silhouetteAlpha * max(g_outlineOpacityScale, 0.0));
     o.color = col;
     o.uv = i.uv;
     return o;

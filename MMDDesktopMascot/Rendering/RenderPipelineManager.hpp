@@ -17,6 +17,7 @@ public:
 	void CreatePostProcessRootSignature();
 	void CreateSsaoPipeline();
 	void CreateBloomPipeline();
+	void CreateToonCompositePipeline();
 	void CreateToneMapPipeline();
 
 	ID3D12RootSignature* GetPmxRootSignature() const
@@ -75,6 +76,10 @@ public:
 	{
 		return m_bloomBlurPso.get();
 	}
+	ID3D12PipelineState* GetToonCompositePso() const
+	{
+		return m_toonCompositePso.get();
+	}
 	ID3D12PipelineState* GetToneMapPso() const
 	{
 		return m_toneMapPso.get();
@@ -98,5 +103,6 @@ private:
 	winrt::com_ptr<ID3D12PipelineState> m_ssaoPso;
 	winrt::com_ptr<ID3D12PipelineState> m_bloomDownPso;
 	winrt::com_ptr<ID3D12PipelineState> m_bloomBlurPso;
+	winrt::com_ptr<ID3D12PipelineState> m_toonCompositePso;
 	winrt::com_ptr<ID3D12PipelineState> m_toneMapPso;
 };

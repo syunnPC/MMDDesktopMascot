@@ -25,6 +25,10 @@ namespace
 {
 	constexpr DXGI_FORMAT kSceneRenderTargetFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
 	constexpr DXGI_FORMAT kPresentRenderTargetFormat = DXGI_FORMAT_B8G8R8A8_UNORM;
+	constexpr DXGI_FORMAT kAuxNormalRenderTargetFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
+	constexpr DXGI_FORMAT kAuxToonRenderTargetFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+	constexpr DXGI_FORMAT kAuxOutlineRenderTargetFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+	constexpr DXGI_FORMAT kAuxEdgeColorRenderTargetFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 	const D3D12_INPUT_ELEMENT_DESC kPmxInputLayout[] = {
 		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
 		{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
@@ -343,8 +347,12 @@ namespace
 		renderTargetBlend.DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
 		renderTargetBlend.BlendOpAlpha = D3D12_BLEND_OP_ADD;
 
-		pso.NumRenderTargets = 1;
+		pso.NumRenderTargets = 5;
 		pso.RTVFormats[0] = kSceneRenderTargetFormat;
+		pso.RTVFormats[1] = kAuxNormalRenderTargetFormat;
+		pso.RTVFormats[2] = kAuxToonRenderTargetFormat;
+		pso.RTVFormats[3] = kAuxOutlineRenderTargetFormat;
+		pso.RTVFormats[4] = kAuxEdgeColorRenderTargetFormat;
 		pso.DSVFormat = DXGI_FORMAT_D32_FLOAT;
 		pso.SampleDesc.Count = sampleCount;
 		pso.SampleDesc.Quality = sampleQuality;
@@ -398,13 +406,13 @@ void RenderPipelineManager::CreatePmxRootSignature()
 	params[1].InitAsConstantBufferView(1, 0, D3D12_SHADER_VISIBILITY_ALL);
 
 	CD3DX12_DESCRIPTOR_RANGE srvRange{};
-	srvRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 4, 0, 0);
+	srvRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 5, 0, 0);
 	params[2].InitAsDescriptorTable(1, &srvRange, D3D12_SHADER_VISIBILITY_PIXEL);
 
 	params[3].InitAsConstantBufferView(2, 0, D3D12_SHADER_VISIBILITY_VERTEX);
 
 	CD3DX12_DESCRIPTOR_RANGE shadowRange{};
-	shadowRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 4, 0);
+	shadowRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 5, 0);
 	params[4].InitAsDescriptorTable(1, &shadowRange, D3D12_SHADER_VISIBILITY_PIXEL);
 
 	D3D12_STATIC_SAMPLER_DESC samplers[3]{};
@@ -625,9 +633,9 @@ void RenderPipelineManager::CreateShadowPipeline()
 
 void RenderPipelineManager::CreatePostProcessRootSignature()
 {
-	CD3DX12_ROOT_PARAMETER params[6]{};
+	CD3DX12_ROOT_PARAMETER params[10]{};
 
-	params[0].InitAsConstants(16, 0);
+	params[0].InitAsConstants(20, 0);
 
 	CD3DX12_DESCRIPTOR_RANGE sceneSrvRange{};
 	sceneSrvRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
@@ -649,6 +657,22 @@ void RenderPipelineManager::CreatePostProcessRootSignature()
 	uavRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0);
 	params[5].InitAsDescriptorTable(1, &uavRange, D3D12_SHADER_VISIBILITY_ALL);
 
+	CD3DX12_DESCRIPTOR_RANGE auxNormalSrvRange{};
+	auxNormalSrvRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 4);
+	params[6].InitAsDescriptorTable(1, &auxNormalSrvRange, D3D12_SHADER_VISIBILITY_ALL);
+
+	CD3DX12_DESCRIPTOR_RANGE auxToonSrvRange{};
+	auxToonSrvRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 5);
+	params[7].InitAsDescriptorTable(1, &auxToonSrvRange, D3D12_SHADER_VISIBILITY_ALL);
+
+	CD3DX12_DESCRIPTOR_RANGE auxOutlineSrvRange{};
+	auxOutlineSrvRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 6);
+	params[8].InitAsDescriptorTable(1, &auxOutlineSrvRange, D3D12_SHADER_VISIBILITY_ALL);
+
+	CD3DX12_DESCRIPTOR_RANGE auxEdgeColorSrvRange{};
+	auxEdgeColorSrvRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 7);
+	params[9].InitAsDescriptorTable(1, &auxEdgeColorSrvRange, D3D12_SHADER_VISIBILITY_ALL);
+
 	D3D12_STATIC_SAMPLER_DESC samplers[2]{};
 	samplers[0].Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
 	samplers[0].AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
@@ -662,7 +686,7 @@ void RenderPipelineManager::CreatePostProcessRootSignature()
 	samplers[1].ShaderRegister = 1;
 
 	CD3DX12_ROOT_SIGNATURE_DESC rsDesc;
-	rsDesc.Init(6, params, 2, samplers, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+	rsDesc.Init(_countof(params), params, 2, samplers, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
 	winrt::com_ptr<ID3DBlob> sigBlob, errBlob;
 	DX_CALL(D3D12SerializeRootSignature(&rsDesc, D3D_ROOT_SIGNATURE_VERSION_1, sigBlob.put(), errBlob.put()));
@@ -723,6 +747,46 @@ void RenderPipelineManager::CreateBloomPipeline()
 	blurPso.pRootSignature = m_postProcessRootSig.get();
 	blurPso.CS = { blurBlob->GetBufferPointer(), blurBlob->GetBufferSize() };
 	DX_CALL(m_ctx->Device()->CreateComputePipelineState(&blurPso, IID_PPV_ARGS(m_bloomBlurPso.put())));
+}
+
+void RenderPipelineManager::CreateToonCompositePipeline()
+{
+	if (!m_postProcessRootSig)
+	{
+		CreatePostProcessRootSignature();
+	}
+
+	const auto vsBlob = LoadOrCompileShader(
+		L"FXAA_VS.hlsl",
+		L"Compiled_FXAA_VS.cso",
+		"VSMain",
+		"vs_5_0",
+		D3DCOMPILE_OPTIMIZATION_LEVEL3,
+		"D3DCompile Toon Composite VS");
+	const auto psBlob = LoadOrCompileShader(
+		L"ToonComposite_PS.hlsl",
+		L"Compiled_ToonComposite_PS.cso",
+		"PSMain",
+		"ps_5_0",
+		D3DCOMPILE_OPTIMIZATION_LEVEL3,
+		"D3DCompile Toon Composite PS");
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC pso{};
+	pso.pRootSignature = m_postProcessRootSig.get();
+	pso.VS = MakeShaderBytecode(vsBlob.get());
+	pso.PS = MakeShaderBytecode(psBlob.get());
+	pso.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+	pso.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+	pso.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+	pso.DepthStencilState.DepthEnable = FALSE;
+	pso.DepthStencilState.StencilEnable = FALSE;
+	pso.SampleMask = UINT_MAX;
+	pso.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+	pso.NumRenderTargets = 1;
+	pso.RTVFormats[0] = kSceneRenderTargetFormat;
+	pso.SampleDesc.Count = 1;
+
+	DX_CALL(m_ctx->Device()->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(m_toonCompositePso.put())));
 }
 
 void RenderPipelineManager::CreateToneMapPipeline()

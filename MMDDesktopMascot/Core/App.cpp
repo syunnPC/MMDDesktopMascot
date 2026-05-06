@@ -519,12 +519,34 @@ void App::StartLoadingModel(const std::filesystem::path& path)
 		// 完了通知 (常に結果構造体を渡し、成否は内容で判定)
 		if (stopToken.stop_requested())
 		{
+			m_isLoading = false;
+			if (m_progress)
+			{
+				m_progress->Hide();
+			}
 			return;
 		}
 
 		if (HWND msgWnd = m_windowManager.MessageWindow())
 		{
-			(void)PostOwnedWindowMessage(msgWnd, WindowManager::kLoadCompleteMessage, std::move(result));
+			if (!PostOwnedWindowMessage(msgWnd, WindowManager::kLoadCompleteMessage, std::move(result)))
+			{
+				m_isLoading = false;
+				m_loadingModelPath.clear();
+				if (m_progress)
+				{
+					m_progress->Hide();
+				}
+			}
+		}
+		else
+		{
+			m_isLoading = false;
+			m_loadingModelPath.clear();
+			if (m_progress)
+			{
+				m_progress->Hide();
+			}
 		}
 
 	});
@@ -663,7 +685,16 @@ void App::InitRenderer()
 		};
 
 	m_renderer = std::make_unique<DcompRenderer>();
-	m_renderer->Initialize(m_windowManager.RenderWindow(), onProgress);
+	try
+	{
+		m_renderer->Initialize(m_windowManager.RenderWindow(), onProgress);
+	}
+	catch (const std::exception& e)
+	{
+		OutputDebugStringA(e.what());
+		progress.Hide();
+		throw;
+	}
 	m_windowManager.SetRenderer(m_renderer.get());
 	m_windowManager.InstallRenderClickThrough();
 	m_windowManager.ForceRenderTreeClickThrough();
@@ -985,7 +1016,20 @@ void App::UpdateLookAtTracking()
 
 	using namespace DirectX;
 
-	const XMFLOAT4X4 headMatrix = m_animator->GetBoneGlobalMatrix(L"頭");
+	const XMFLOAT4X4* headMatrixPtr = nullptr;
+	for (const auto* name : { L"頭", L"Head", L"head" })
+	{
+		int idx = m_animator->ResolveBoneIndex(name);
+		if (idx >= 0)
+		{
+			static XMFLOAT4X4 mat;
+			mat = m_animator->GetBoneGlobalMatrix(name);
+			headMatrixPtr = &mat;
+			break;
+		}
+	}
+	if (!headMatrixPtr) return;
+	const XMFLOAT4X4& headMatrix = *headMatrixPtr;
 	const XMVECTOR position = XMVectorSet(headMatrix._41, headMatrix._42, headMatrix._43, 1.0f);
 	const XMVECTOR up = XMVector3Normalize(XMVectorSet(headMatrix._21, headMatrix._22, headMatrix._23, 0.0f));
 	const XMFLOAT3 headScreen = m_renderer->ProjectToScreen(
@@ -1165,7 +1209,7 @@ bool App::ApplyMotionCommand(UINT id)
 	if (id < CMD_MOTION_BASE) return false;
 
 	const size_t idx = id - CMD_MOTION_BASE;
-	if (idx >= m_motionFiles.size() || !m_animator) return true;
+	if (idx >= m_motionFiles.size() || !m_animator) return false;
 
 	m_animator->LoadMotion(m_motionFiles[idx]);
 	BuildTrayMenu();

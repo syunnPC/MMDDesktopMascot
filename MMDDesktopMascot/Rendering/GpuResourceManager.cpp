@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <mutex>
 #include <stdexcept>
 #include <utility>
 
@@ -288,7 +289,8 @@ uint32_t GpuResourceManager::AllocSrvIndex()
 	}
 	if (m_nextSrvIndex >= m_srvCapacity)
 	{
-		throw std::runtime_error("SRV heap capacity exceeded.");
+		OutputDebugStringW(L"GpuResourceManager: SRV heap capacity (4096) exceeded. Returning fallback.\n");
+		return m_defaultWhiteSrv;
 	}
 
 	const uint32_t idx = m_nextSrvIndex++;
@@ -324,6 +326,22 @@ uint32_t GpuResourceManager::AllocSrvBlock4()
 
 	const uint32_t base = m_nextSrvIndex;
 	m_nextSrvIndex += 4;
+	return base;
+}
+
+uint32_t GpuResourceManager::AllocSrvBlock5()
+{
+	if (!m_srvHeap || m_srvCapacity == 0)
+	{
+		throw std::runtime_error("SRV heap is not initialized.");
+	}
+	if (m_srvCapacity < 5 || m_nextSrvIndex > m_srvCapacity - 5)
+	{
+		throw std::runtime_error("SRV heap capacity exceeded.");
+	}
+
+	const uint32_t base = m_nextSrvIndex;
+	m_nextSrvIndex += 5;
 	return base;
 }
 
@@ -594,22 +612,25 @@ GpuResourceManager::CreateTexture2DFromRgbaMips(
 		ch = std::max(1u, ch / 2);
 	}
 
-	m_uploadAlloc->Reset();
-	m_uploadCmdList->Reset(m_uploadAlloc.get(), nullptr);
+	{
+		std::lock_guard<std::mutex> lock(m_uploadMutex);
+		m_uploadAlloc->Reset();
+		m_uploadCmdList->Reset(m_uploadAlloc.get(), nullptr);
 
-	UpdateSubresources(
-		m_uploadCmdList.get(), tex.get(), upload.get(),
-		0, 0, (UINT)subs.size(), subs.data());
+		UpdateSubresources(
+			m_uploadCmdList.get(), tex.get(), upload.get(),
+			0, 0, (UINT)subs.size(), subs.data());
 
-	auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-		tex.get(),
-		D3D12_RESOURCE_STATE_COPY_DEST,
-		D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-	m_uploadCmdList->ResourceBarrier(1, &barrier);
+		auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+			tex.get(),
+			D3D12_RESOURCE_STATE_COPY_DEST,
+			D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+		m_uploadCmdList->ResourceBarrier(1, &barrier);
 
-	m_uploadCmdList->Close();
-	ID3D12CommandList* lists[] = { m_uploadCmdList.get() };
-	m_ctx->Queue()->ExecuteCommandLists(1, lists);
+		m_uploadCmdList->Close();
+		ID3D12CommandList* lists[] = { m_uploadCmdList.get() };
+		m_ctx->Queue()->ExecuteCommandLists(1, lists);
+	}
 
 	if (m_waitForGpu)
 	{
@@ -660,24 +681,27 @@ GpuResourceManager::CreateTexture2DFromRgba(const uint8_t* rgba, uint32_t width,
 	sub.RowPitch = (LONG_PTR)width * 4;
 	sub.SlicePitch = sub.RowPitch * height;
 
-	m_uploadAlloc->Reset();
-	m_uploadCmdList->Reset(m_uploadAlloc.get(), nullptr);
+	{
+		std::lock_guard<std::mutex> lock(m_uploadMutex);
+		m_uploadAlloc->Reset();
+		m_uploadCmdList->Reset(m_uploadAlloc.get(), nullptr);
 
-	UpdateSubresources(
-		m_uploadCmdList.get(),
-		tex.get(), upload.get(),
-		0, 0, 1, &sub);
+		UpdateSubresources(
+			m_uploadCmdList.get(),
+			tex.get(), upload.get(),
+			0, 0, 1, &sub);
 
-	auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-		tex.get(),
-		D3D12_RESOURCE_STATE_COPY_DEST,
-		D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+		auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+			tex.get(),
+			D3D12_RESOURCE_STATE_COPY_DEST,
+			D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
-	m_uploadCmdList->ResourceBarrier(1, &barrier);
+		m_uploadCmdList->ResourceBarrier(1, &barrier);
 
-	m_uploadCmdList->Close();
-	ID3D12CommandList* lists[] = { m_uploadCmdList.get() };
-	m_ctx->Queue()->ExecuteCommandLists(1, lists);
+		m_uploadCmdList->Close();
+		ID3D12CommandList* lists[] = { m_uploadCmdList.get() };
+		m_ctx->Queue()->ExecuteCommandLists(1, lists);
+	}
 
 	if (m_waitForGpu)
 	{

@@ -89,6 +89,7 @@ struct PSIn
     float2 uv : TEXCOORD0;
     float4 addUv1 : TEXCOORD4;
     float4 worldTangent : TEXCOORD5;
+    float edgeScale : TEXCOORD6;
 };
 
 PSIn VSMain(VSIn i)
@@ -141,6 +142,7 @@ PSIn VSMain(VSIn i)
     o.viewDir = normalize(g_cameraPos - worldPos.xyz);
     o.uv = i.uv;
     o.addUv1 = i.addUv1;
+    o.edgeScale = i.edgeScale;
 
     float3 worldTan = normalize(mul(normalMatrix, skinnedTan));
     // Re-orthogonalize tangent against normal

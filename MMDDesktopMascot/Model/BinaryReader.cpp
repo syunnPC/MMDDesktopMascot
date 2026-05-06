@@ -86,7 +86,15 @@ std::u16string BinaryReader::ReadStringUtf16LeWithLength()
 	{
 		std::uint16_t lo = bytes[i * 2 + 0];
 		std::uint16_t hi = bytes[i * 2 + 1];
-		s[i] = static_cast<char16_t>((hi << 8) | lo);
+		const char16_t ch = static_cast<char16_t>((hi << 8) | lo);
+		if (ch >= 0xD800u && ch <= 0xDFFFu)
+		{
+			s[i] = 0xFFFDu;
+		}
+		else
+		{
+			s[i] = ch;
+		}
 	}
 	return s;
 }

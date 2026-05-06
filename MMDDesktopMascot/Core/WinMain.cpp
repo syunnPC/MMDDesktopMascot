@@ -265,7 +265,11 @@ namespace
 		wchar_t buffer[2];
 		SetLastError(ERROR_SUCCESS);
 		const DWORD size = GetEnvironmentVariableW(name, buffer, static_cast<DWORD>(std::size(buffer)));
-		return size != 0 || GetLastError() != ERROR_ENVVAR_NOT_FOUND;
+		if (size == 0)
+		{
+			return GetLastError() == ERROR_SUCCESS;
+		}
+		return true;
 	}
 
 	void RelaunchWithOpenMpPassiveIfNeeded()
@@ -302,6 +306,7 @@ namespace
 		else
 		{
 			OutputDebugStringW(L"CreateProcessW() failed.");
+			SetEnvironmentVariableW(L"OMP_WAIT_POLICY", policy);
 			if (MessageBoxW(
 				nullptr,
 				L"Failed to set OpenMP environment variable. Performance may be reduced. Continue?",

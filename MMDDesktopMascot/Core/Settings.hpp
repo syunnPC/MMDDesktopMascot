@@ -19,6 +19,23 @@ enum class AntiAliasingMode
 	MsaaFxaa = 3
 };
 
+enum class ToonDebugView
+{
+	Final = 0,
+	BaseColor = 1,
+	ShadowColor = 2,
+	NdotL = 3,
+	SpecularMask = 4,
+	Normal = 5,
+	MaterialId = 6,
+	OutlineMask = 7,
+	DepthEdge = 8,
+	NormalEdge = 9,
+	MaterialEdge = 10,
+	FinalOutline = 11,
+	Rim = 12
+};
+
 struct LightSettings
 {
 	float brightness = 1.5f;
@@ -82,6 +99,7 @@ struct LightSettings
 	bool normalMapEnabled = true;
 	float normalMapIntensity = 1.0f;
 	bool filmicToneMapEnabled = true;
+	int toonDebugView = static_cast<int>(ToonDebugView::Final);
 };
 
 struct PhysicsSettings

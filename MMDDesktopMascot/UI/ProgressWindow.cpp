@@ -1,6 +1,8 @@
 #include "ProgressWindow.hpp"
 #include "Win32UiUtil.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <stdexcept>
 #include <uxtheme.h>
 
@@ -89,8 +91,8 @@ void ProgressWindow::Show()
 	const int labelW = 380;
 	const int labelH = 20;
 
-	const int labelX = (clientW - labelW) / 2;
-	const int barX = (clientW - barW) / 2;
+	const int labelX = std::max(0, (clientW - labelW) / 2);
+	const int barX = std::max(0, (clientW - barW) / 2);
 
 	m_statusLabel = CreateWindowExW(
 		0,
@@ -148,7 +150,12 @@ void ProgressWindow::SetProgress(float percentage)
 		return;
 	}
 
-	const int pos = static_cast<int>(percentage * 100.0f);
+	if (!std::isfinite(percentage))
+	{
+		return;
+	}
+
+	const int pos = static_cast<int>(std::clamp(percentage, 0.0f, 1.0f) * 100.0f);
 	SendMessageW(m_progressBar, PBM_SETPOS, pos, 0);
 }
 
@@ -183,6 +190,9 @@ LRESULT ProgressWindow::WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
 			SetBkMode(hdc, TRANSPARENT);
 			return reinterpret_cast<LRESULT>(m_darkBrush);
 		}
+		case WM_CLOSE:
+			Hide();
+			return 0;
 		default:
 			return DefWindowProcW(hWnd, msg, wParam, lParam);
 	}

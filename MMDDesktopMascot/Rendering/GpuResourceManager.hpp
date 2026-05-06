@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -46,6 +47,7 @@ public:
 	uint32_t AllocSrvIndex();
 	uint32_t AllocSrvBlock3();
 	uint32_t AllocSrvBlock4();
+	uint32_t AllocSrvBlock5();
 	void CopySrv(uint32_t dstIndex, uint32_t srcIndex);
 
 	uint32_t GetDefaultWhiteSrv() const
@@ -102,6 +104,7 @@ private:
 
 	winrt::com_ptr<ID3D12CommandAllocator> m_uploadAlloc;
 	winrt::com_ptr<ID3D12GraphicsCommandList> m_uploadCmdList;
+	std::mutex m_uploadMutex;
 
 	uint32_t m_nextSrvIndex = 0;
 	uint32_t m_defaultWhiteSrv = 0;

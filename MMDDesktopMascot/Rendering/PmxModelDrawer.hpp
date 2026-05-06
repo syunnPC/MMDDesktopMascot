@@ -64,7 +64,14 @@ public:
 		DirectX::XMFLOAT4 toonFactor{ 1.0f, 1.0f, 1.0f, 1.0f };
 		DirectX::XMFLOAT4 normalFactor{ 1.0f, 1.0f, 1.0f, 1.0f };
 		float normalMapIntensity{ 1.0f };
-		float _pad1[3]{};
+		float materialIdNormalized{};
+		float edgeEnabled{};
+		float _pad1{};
+
+		DirectX::XMFLOAT4 shadowColorOverride{};
+		DirectX::XMFLOAT4 toonParams0{ -1.0f, -1.0f, 0.45f, 0.12f };
+		DirectX::XMFLOAT4 toonParams1{ 0.45f, -1.0f, 0.0f, 0.0f };
+		DirectX::XMFLOAT4 toonParams2{ 0.0f, 1.0f, 0.0f, 0.0f };
 	};
 
 	struct alignas(16) BoneCB
@@ -88,6 +95,13 @@ public:
 		float toonContrastMul = 1.0f;
 		uint32_t materialType = 0;
 		float normalMapIntensity = 1.0f;
+		bool edgeEnabled = true;
+		bool edgeEnabledOverridesPmxFlag = false;
+		float alphaCutoutOverride = -1.0f;
+		DirectX::XMFLOAT4 shadowColorOverride{};
+		DirectX::XMFLOAT4 toonParams0{ -1.0f, -1.0f, 0.45f, 0.12f };
+		DirectX::XMFLOAT4 toonParams1{ 0.45f, -1.0f, 0.0f, 0.0f };
+		DirectX::XMFLOAT4 toonParams2{ 0.0f, 1.0f, 0.0f, 0.0f };
 	};
 
 	struct PmxGpu

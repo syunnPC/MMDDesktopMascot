@@ -222,7 +222,13 @@ void PmxModel::LoadTextures(BinaryReader& br)
 	const std::filesystem::path modelDirectory = m_path.parent_path();
 	for (int32_t i = 0; i < textureCount; ++i)
 	{
-		m_textures.push_back(modelDirectory / ReadPmxText(br));
+		std::filesystem::path texPath = modelDirectory / ReadPmxText(br);
+		texPath = texPath.lexically_normal();
+		if (texPath.wstring().find(L"..") != std::wstring::npos)
+		{
+			texPath = modelDirectory / texPath.filename();
+		}
+		m_textures.push_back(texPath);
 	}
 }
 
@@ -258,7 +264,7 @@ void PmxModel::LoadMaterials(BinaryReader& br)
 		material.toonFlag = br.Read<std::uint8_t>();
 		material.toonIndex = (material.toonFlag == 0)
 			? ReadIndexSigned(br, m_header.textureIndexSize)
-			: static_cast<int32_t>(br.Read<std::uint8_t>());
+			: static_cast<int32_t>(std::clamp(br.Read<std::uint8_t>(), static_cast<std::uint8_t>(0), static_cast<std::uint8_t>(9)));
 
 		material.memo = ReadPmxText(br);
 		material.indexCount = br.Read<std::int32_t>();
@@ -368,7 +374,7 @@ PmxModel::VertexWeight PmxModel::ReadVertexWeight(BinaryReader& br) const
 void PmxModel::LoadBones(BinaryReader& br)
 {
 	const auto boneCount = br.Read<std::int32_t>();
-	if (boneCount < 0)
+	if (boneCount < 0 || boneCount > 65535)
 	{
 		throw std::runtime_error("Invalid boneCount.");
 	}
@@ -466,7 +472,7 @@ void PmxModel::GetBounds(float& minx, float& miny, float& minz,
 void PmxModel::LoadMorphs(BinaryReader& br)
 {
 	const int32_t morphCount = br.Read<std::int32_t>();
-	if (morphCount < 0) throw std::runtime_error("Invalid morphCount.");
+	if (morphCount < 0 || morphCount > 65535) throw std::runtime_error("Invalid morphCount.");
 
 	m_morphs.clear();
 	m_morphs.reserve(static_cast<size_t>(morphCount));
@@ -478,6 +484,11 @@ void PmxModel::LoadMorphs(BinaryReader& br)
 		morph.nameEn = ReadPmxText(br);
 		morph.panel = br.Read<std::uint8_t>();
 		morph.type = static_cast<Morph::Type>(br.Read<std::uint8_t>());
+
+		if (static_cast<int>(morph.type) < 0 || static_cast<int>(morph.type) > 9)
+		{
+			throw std::runtime_error("Unknown morph type.");
+		}
 
 		const int32_t offsetCount = br.Read<std::int32_t>();
 		if (offsetCount < 0) throw std::runtime_error("Invalid morph offsetCount.");
@@ -508,7 +519,10 @@ void PmxModel::LoadMorphs(BinaryReader& br)
 					Morph::GroupOffset offset{};
 					offset.morphIndex = ReadIndexSigned(br, m_header.morphIndexSize);
 					offset.weight = br.Read<float>();
-					morph.groupOffsets.push_back(offset);
+					if (offset.morphIndex >= 0 && static_cast<size_t>(offset.morphIndex) < m_morphs.size())
+					{
+						morph.groupOffsets.push_back(offset);
+					}
 					break;
 				}
 				case Morph::Type::Vertex:
@@ -516,7 +530,10 @@ void PmxModel::LoadMorphs(BinaryReader& br)
 					Morph::VertexOffset offset{};
 					offset.vertexIndex = ReadIndexUnsigned(br, m_header.vertexIndexSize);
 					offset.positionOffset = ReadFloat3(br);
-					morph.vertexOffsets.push_back(offset);
+					if (offset.vertexIndex < m_vertices.size())
+					{
+						morph.vertexOffsets.push_back(offset);
+					}
 					break;
 				}
 				case Morph::Type::Bone:
@@ -525,7 +542,10 @@ void PmxModel::LoadMorphs(BinaryReader& br)
 					offset.boneIndex = ReadIndexSigned(br, m_header.boneIndexSize);
 					offset.translation = ReadFloat3(br);
 					offset.rotation = ReadFloat4(br);
-					morph.boneOffsets.push_back(offset);
+					if (offset.boneIndex >= 0 && static_cast<size_t>(offset.boneIndex) < m_bones.size())
+					{
+						morph.boneOffsets.push_back(offset);
+					}
 					break;
 				}
 				case Morph::Type::UV:
@@ -541,7 +561,10 @@ void PmxModel::LoadMorphs(BinaryReader& br)
 							? 0
 							: (static_cast<int>(morph.type) - static_cast<int>(Morph::Type::AdditionalUV1) + 1));
 					offset.offset = ReadFloat4(br);
-					morph.uvOffsets.push_back(offset);
+					if (offset.vertexIndex < m_vertices.size())
+					{
+						morph.uvOffsets.push_back(offset);
+					}
 					break;
 				}
 				case Morph::Type::Material:
@@ -558,7 +581,10 @@ void PmxModel::LoadMorphs(BinaryReader& br)
 					offset.textureFactor = ReadFloat4(br);
 					offset.sphereTextureFactor = ReadFloat4(br);
 					offset.toonTextureFactor = ReadFloat4(br);
-					morph.materialOffsets.push_back(offset);
+					if (offset.materialIndex >= 0 && static_cast<size_t>(offset.materialIndex) < m_materials.size())
+					{
+						morph.materialOffsets.push_back(offset);
+					}
 					break;
 				}
 				case Morph::Type::Flip:
@@ -566,7 +592,10 @@ void PmxModel::LoadMorphs(BinaryReader& br)
 					Morph::FlipOffset offset{};
 					offset.morphIndex = ReadIndexSigned(br, m_header.morphIndexSize);
 					offset.weight = br.Read<float>();
-					morph.flipOffsets.push_back(offset);
+					if (offset.morphIndex >= 0 && static_cast<size_t>(offset.morphIndex) < m_morphs.size())
+					{
+						morph.flipOffsets.push_back(offset);
+					}
 					break;
 				}
 				case Morph::Type::Impulse:
@@ -576,7 +605,10 @@ void PmxModel::LoadMorphs(BinaryReader& br)
 					offset.localFlag = br.Read<std::uint8_t>();
 					offset.velocity = ReadFloat3(br);
 					offset.torque = ReadFloat3(br);
-					morph.impulseOffsets.push_back(offset);
+					if (offset.rigidBodyIndex >= 0 && static_cast<size_t>(offset.rigidBodyIndex) < m_rigidBodies.size())
+					{
+						morph.impulseOffsets.push_back(offset);
+					}
 					break;
 				}
 				default:
@@ -625,7 +657,7 @@ void PmxModel::LoadRigidBodies(BinaryReader& br)
 	m_rigidBodies.clear();
 
 	const int32_t rigidCount = br.Read<std::int32_t>();
-	if (rigidCount < 0) throw std::runtime_error("Invalid rigidCount.");
+	if (rigidCount < 0 || rigidCount > 65535) throw std::runtime_error("Invalid rigidCount.");
 	m_rigidBodies.reserve(static_cast<size_t>(rigidCount));
 
 	for (int32_t i = 0; i < rigidCount; ++i)
@@ -655,7 +687,7 @@ void PmxModel::LoadJoints(BinaryReader& br)
 	m_joints.clear();
 
 	const int32_t jointCount = br.Read<std::int32_t>();
-	if (jointCount < 0) throw std::runtime_error("Invalid jointCount.");
+	if (jointCount < 0 || jointCount > 65535) throw std::runtime_error("Invalid jointCount.");
 	m_joints.reserve(static_cast<size_t>(jointCount));
 
 	for (int32_t i = 0; i < jointCount; ++i)
@@ -687,7 +719,7 @@ void PmxModel::LoadSoftBodies(BinaryReader& br)
 	}
 
 	const int32_t softBodyCount = br.Read<std::int32_t>();
-	if (softBodyCount < 0)
+	if (softBodyCount < 0 || softBodyCount > 65535)
 	{
 		throw std::runtime_error("Invalid softBodyCount.");
 	}

@@ -208,7 +208,9 @@ private:
 	void FinalizeTickState(float currentFrame);
 
 	void UpdateMotionCache(const VmdMotion* motion);
+public:
 	int ResolveBoneIndex(const std::wstring& boneName) const;
+private:
 	void CacheMorphIndices();
 	void ResolveMorphsAndApplyBoneMorphs();
 	void AccumulateMorphWeight(int morphIndex, float weight, std::vector<uint8_t>& visitState);

@@ -161,6 +161,27 @@ private:
         float shadowBias{ 0.0015f };
         float outlineWidthScale{ 1.0f };
         float outlineOpacityScale{ 1.0f };
+
+        float toonShadowThreshold{ 0.35f };
+        float toonShadowSoftness{ 0.03f };
+        float ambientNormalInfluence{ 0.15f };
+        float skinLightInfluence{ 0.5f };
+
+        float specThreshold{ 0.65f };
+        float hairSpecCenter{ 0.45f };
+        float hairSpecWidth{ 0.12f };
+        float hairSpecIntensity{ 0.45f };
+
+        float outlineBaseWidth{ 1.25f };
+        float depthEdgeThreshold{ 0.002f };
+        float normalEdgeThreshold{ 0.35f };
+        float rimThreshold{ 0.15f };
+
+        float rimSoftness{ 0.12f };
+        DirectX::XMFLOAT3 rimColor{ 0.55f, 0.72f, 1.0f };
+
+        uint32_t toonDebugView{ 0 };
+        DirectX::XMFLOAT3 _toonDebugPad{};
     };
     #pragma warning(pop)
 
@@ -211,6 +232,8 @@ private:
 
     void CreateIntermediateResources();
     void ReleaseIntermediateResources();
+    void CreateToonAuxiliaryResources();
+    void ReleaseToonAuxiliaryResources();
     void ReportProgress(float value, const wchar_t* msg);
 
     void CreatePostProcessResources();
@@ -229,8 +252,60 @@ private:
         PP_Bloom0Srv,
         PP_Bloom1Uav,
         PP_Bloom1Srv,
+        PP_AuxNormalSrv,
+        PP_AuxToonSrv,
+        PP_AuxOutlineSrv,
+        PP_AuxEdgeColorSrv,
+        PP_ToonCompositeSrv,
         PP_DescriptorCount
     };
+
+    enum ToonRtvIndex
+    {
+        ToonRtv_AuxNormal = 0,
+        ToonRtv_AuxToon,
+        ToonRtv_AuxOutline,
+        ToonRtv_AuxEdgeColor,
+        ToonRtv_MsaaAuxNormal,
+        ToonRtv_MsaaAuxToon,
+        ToonRtv_MsaaAuxOutline,
+        ToonRtv_MsaaAuxEdgeColor,
+        ToonRtv_Composite,
+        ToonRtv_Count
+    };
+
+    winrt::com_ptr<ID3D12DescriptorHeap> m_toonRtvHeap;
+    UINT m_toonRtvDescriptorSize = 0;
+    D3D12_CPU_DESCRIPTOR_HANDLE m_auxNormalRtvHandle{};
+    D3D12_CPU_DESCRIPTOR_HANDLE m_auxToonRtvHandle{};
+    D3D12_CPU_DESCRIPTOR_HANDLE m_auxOutlineRtvHandle{};
+    D3D12_CPU_DESCRIPTOR_HANDLE m_auxEdgeColorRtvHandle{};
+    D3D12_CPU_DESCRIPTOR_HANDLE m_msaaAuxNormalRtvHandle{};
+    D3D12_CPU_DESCRIPTOR_HANDLE m_msaaAuxToonRtvHandle{};
+    D3D12_CPU_DESCRIPTOR_HANDLE m_msaaAuxOutlineRtvHandle{};
+    D3D12_CPU_DESCRIPTOR_HANDLE m_msaaAuxEdgeColorRtvHandle{};
+    D3D12_CPU_DESCRIPTOR_HANDLE m_toonCompositeRtvHandle{};
+
+    winrt::com_ptr<ID3D12Resource> m_auxNormalTex;
+    winrt::com_ptr<ID3D12Resource> m_auxToonTex;
+    winrt::com_ptr<ID3D12Resource> m_auxOutlineTex;
+    winrt::com_ptr<ID3D12Resource> m_auxEdgeColorTex;
+    D3D12_RESOURCE_STATES m_auxNormalState = D3D12_RESOURCE_STATE_RENDER_TARGET;
+    D3D12_RESOURCE_STATES m_auxToonState = D3D12_RESOURCE_STATE_RENDER_TARGET;
+    D3D12_RESOURCE_STATES m_auxOutlineState = D3D12_RESOURCE_STATE_RENDER_TARGET;
+    D3D12_RESOURCE_STATES m_auxEdgeColorState = D3D12_RESOURCE_STATE_RENDER_TARGET;
+
+    winrt::com_ptr<ID3D12Resource> m_msaaAuxNormalTex;
+    winrt::com_ptr<ID3D12Resource> m_msaaAuxToonTex;
+    winrt::com_ptr<ID3D12Resource> m_msaaAuxOutlineTex;
+    winrt::com_ptr<ID3D12Resource> m_msaaAuxEdgeColorTex;
+    D3D12_RESOURCE_STATES m_msaaAuxNormalState = D3D12_RESOURCE_STATE_RENDER_TARGET;
+    D3D12_RESOURCE_STATES m_msaaAuxToonState = D3D12_RESOURCE_STATE_RENDER_TARGET;
+    D3D12_RESOURCE_STATES m_msaaAuxOutlineState = D3D12_RESOURCE_STATE_RENDER_TARGET;
+    D3D12_RESOURCE_STATES m_msaaAuxEdgeColorState = D3D12_RESOURCE_STATE_RENDER_TARGET;
+
+    winrt::com_ptr<ID3D12Resource> m_toonCompositeTex;
+    D3D12_RESOURCE_STATES m_toonCompositeState = D3D12_RESOURCE_STATE_RENDER_TARGET;
 
     winrt::com_ptr<ID3D12Resource> m_ssaoTex;
     D3D12_RESOURCE_STATES m_ssaoState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;

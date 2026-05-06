@@ -316,6 +316,9 @@ void MmdAnimator::UpdateMotionCache(const VmdMotion* motion)
 	m_pose.boneRotations.reserve(std::max(m_pose.boneRotations.size(), bonePoseReserveTarget) + 8);
 	m_pose.morphWeights.reserve(std::max(m_pose.morphWeights.size(), morphPoseReserveTarget) + 8);
 
+	m_poseTranslationTrackSlots.assign(boneTracks.size(), nullptr);
+	m_poseRotationTrackSlots.assign(boneTracks.size(), nullptr);
+
 	// 名前検索用マップを作成 (O(N) + O(M))
 	std::unordered_map<std::wstring, int> boneMap;
 	boneMap.reserve(bones.size());
@@ -540,7 +543,8 @@ float MmdAnimator::ComputeCurrentFrame(const VmdMotion* motion) const
 	if (!motion) return 0.0f;
 
 	const float currentFrameRaw = static_cast<float>(m_time * m_fps);
-	const float maxFrame = static_cast<float>(motion->MaxFrame() + 1);
+	const uint64_t maxFrameVal = static_cast<uint64_t>(motion->MaxFrame()) + 1;
+	const float maxFrame = static_cast<float>(maxFrameVal);
 	return NormalizeFrame(currentFrameRaw, maxFrame);
 }
 
@@ -862,7 +866,7 @@ void MmdAnimator::Tick(double dtSeconds)
 		if (motion)
 		{
 			const double cycleSeconds =
-				static_cast<double>(motion->MaxFrame() + 1) / std::max(1.0, m_fps);
+				static_cast<double>(static_cast<uint64_t>(motion->MaxFrame()) + 1) / std::max(1.0, m_fps);
 			if (cycleSeconds > 0.0)
 			{
 				m_time = std::fmod(m_time, cycleSeconds);

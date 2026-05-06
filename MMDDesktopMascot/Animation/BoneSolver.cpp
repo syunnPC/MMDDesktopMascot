@@ -299,7 +299,7 @@ void BoneSolver::Initialize(const PmxModel* model)
 	m_hasLastIkDominantEuler.assign(n, 0);
 	m_lastIkLimitedEuler.assign(n, { 0.0f, 0.0f, 0.0f });
 	m_hasLastIkLimitedEuler.assign(n, 0);
-	m_boneChildren.assign(n, {});
+	m_boneChildren.clear();
 
 	m_boneNameToIndex.reserve(n);
 	for (size_t i = 0; i < n; ++i)
@@ -314,15 +314,6 @@ void BoneSolver::Initialize(const PmxModel* model)
 
 		DirectX::XMStoreFloat4x4(&m_skinningMatrices[i], DirectX::XMMatrixIdentity());
 		DirectX::XMStoreFloat4x4(&m_inverseBindMatrices[i], DirectX::XMMatrixIdentity());
-	}
-
-	for (size_t i = 0; i < n; ++i)
-	{
-		const int parentIndex = m_bones[i].parentIndex;
-		if (parentIndex >= 0 && parentIndex < static_cast<int>(n))
-		{
-			m_boneChildren[parentIndex].push_back(i);
-		}
 	}
 
 	BuildSortedBoneOrder();
@@ -440,7 +431,10 @@ void BoneSolver::ComputeBindPoseMatrices()
 	for (int i = 0; i < boneCount; ++i)
 	{
 		XMMATRIX bindMat = XMLoadFloat4x4(&m_boneStates[i].globalMatrix);
-		XMMATRIX inv = XMMatrixInverse(nullptr, bindMat);
+		XMVECTOR det = XMMatrixDeterminant(bindMat);
+		XMMATRIX inv = (std::abs(XMVectorGetX(det)) > 1.0e-8f)
+			? XMMatrixInverse(nullptr, bindMat)
+			: XMMatrixIdentity();
 		XMStoreFloat4x4(&m_inverseBindMatrices[i], inv);
 	}
 }
@@ -505,22 +499,16 @@ void BoneSolver::SolveIKPhase(UpdatePhase phase)
 		SolveIKBone(idx);
 	}
 
-	int nFoot = (int)footIKs.size();
-#ifdef _OPENMP
-#pragma omp parallel for schedule(dynamic) if(nFoot > 1)
-#endif
-	for (int i = 0; i < nFoot; ++i)
+	// Foot IK は両足が共通の祖先ボーン（腰）を参照する可能性があるため、
+	// OpenMPによる並列化を避け、逐次実行でデータ競合を防止する。
+	for (size_t idx : footIKs)
 	{
-		SolveIKBone(footIKs[i]);
+		SolveIKBone(idx);
 	}
 
-	int nToe = (int)toeIKs.size();
-#ifdef _OPENMP
-#pragma omp parallel for schedule(dynamic) if(nToe > 1)
-#endif
-	for (int i = 0; i < nToe; ++i)
+	for (size_t idx : toeIKs)
 	{
-		SolveIKBone(toeIKs[i]);
+		SolveIKBone(idx);
 	}
 }
 
@@ -618,6 +606,7 @@ void BoneSolver::SolveIKBone(size_t boneIndex)
 	float limitAngle = NormalizeIkUnitAngle(ikBone.ikLimitAngle);
 	if (limitAngle <= 0.0f) limitAngle = DirectX::XM_PI;
 	const int loopCount = ikBone.ikLoopCount;
+	if (loopCount <= 0) return;
 
 	auto UpdateToTargetFrom = [&](size_t changedIdx) -> bool
 		{
@@ -710,7 +699,13 @@ void BoneSolver::SolveIKBone(size_t boneIndex)
 			{
 				parentGlobal = XMLoadFloat4x4(&m_boneStates[parentIdx].globalMatrix);
 			}
-			XMMATRIX parentInv = XMMatrixInverse(nullptr, parentGlobal);
+			XMMATRIX parentInv;
+			{
+				XMVECTOR det = XMMatrixDeterminant(parentGlobal);
+				parentInv = (std::abs(XMVectorGetX(det)) > 1.0e-8f)
+					? XMMatrixInverse(nullptr, parentGlobal)
+					: XMMatrixIdentity();
+			}
 
 			// ターゲット距離を、膝の制限範囲で達成可能な距離にクランプ（届かない場合は最も近い距離へ）
 			XMVECTOR AD = XMVectorSubtract(destPos, A);
@@ -967,7 +962,13 @@ void BoneSolver::SolveIKBone(size_t boneIndex)
 			{
 				parentGlobal = XMLoadFloat4x4(&m_boneStates[parentIndex].globalMatrix);
 			}
-			XMMATRIX parentInv = XMMatrixInverse(nullptr, parentGlobal);
+			XMMATRIX parentInv;
+			{
+				XMVECTOR det = XMMatrixDeterminant(parentGlobal);
+				parentInv = (std::abs(XMVectorGetX(det)) > 1.0e-8f)
+					? XMMatrixInverse(nullptr, parentGlobal)
+					: XMMatrixIdentity();
+			}
 
 			// --- 1軸制限（膝など）の判定 ---
 			bool hasLimit = link.hasLimit;
@@ -1179,7 +1180,9 @@ void BoneSolver::UpdateMatricesAfterPhysics()
 void BoneSolver::UpdateSkinningMatrices()
 {
 	const int n = static_cast<int>(m_bones.size());
+#ifdef _OPENMP
 #pragma omp parallel for schedule(static) if(n >= 256)
+#endif
 	for (int i = 0; i < n; ++i) CalculateSkinningMatrix(i);
 	RecomputeBounds();
 }

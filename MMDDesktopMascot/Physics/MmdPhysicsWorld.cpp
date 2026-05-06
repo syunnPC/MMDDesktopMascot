@@ -290,6 +290,12 @@ namespace
 		FXMVECTOR p2, FXMVECTOR q2,
 		XMVECTOR& outC1, XMVECTOR& outC2)
 	{
+		if (!IsVectorFinite3(p1) || !IsVectorFinite3(q1) ||
+			!IsVectorFinite3(p2) || !IsVectorFinite3(q2))
+		{
+			outC1 = p1; outC2 = p2; return;
+		}
+
 		XMVECTOR d1 = XMVectorSubtract(q1, p1);
 		XMVECTOR d2 = XMVectorSubtract(q2, p2);
 		XMVECTOR r = XMVectorSubtract(p1, p2);
@@ -388,7 +394,8 @@ namespace
 
 	inline static uint16_t ToCollisionGroupBit(int groupIndex)
 	{
-		if (std::getenv("MMD_PHYSICS_GROUP_ONE_BASED"))
+		static const bool s_groupOneBased = (std::getenv("MMD_PHYSICS_GROUP_ONE_BASED") != nullptr);
+		if (s_groupOneBased)
 		{
 			--groupIndex;
 		}
@@ -566,7 +573,7 @@ void MmdPhysicsWorld::BuildFromModel(const PmxModel& model, const BoneSolver& bo
 			softBodyDefs,
 			directPairCount,
 			inversePairCount);
-		m_useDirectCollisionMaskSemantics = true;
+		m_useDirectCollisionMaskSemantics = resolvedDirectMaskSemantics;
 
 		std::ostringstream oss;
 		oss << "GroupMaskSemantics resolved="
@@ -1465,7 +1472,8 @@ void MmdPhysicsWorld::Step(double dtSeconds,
 
 	UpdateSoftBodyVertexOverrides(model);
 	m_hasPrevAnimationBoneGlobals = true;
-	if (!std::getenv("MMD_PHYSICS_DISABLE_WRITEBACK"))
+	static const bool s_disableWriteback = (std::getenv("MMD_PHYSICS_DISABLE_WRITEBACK") != nullptr);
+	if (!s_disableWriteback)
 	{
 		WriteBackBones(model, bones);
 	}
@@ -1507,8 +1515,8 @@ void MmdPhysicsWorld::DestroyRealBulletWorld()
 	m_btMotionStates.clear();
 	m_btShapes.clear();
 	m_btSoftBodies.clear();
-	m_btWorld.reset();
 	m_btSoftWorld = nullptr;
+	m_btWorld.reset();
 	m_btSolver.reset();
 	m_btBroadphase.reset();
 	m_btDispatcher.reset();
@@ -1672,9 +1680,10 @@ void MmdPhysicsWorld::InitializeRealBulletWorld(const PmxModel& model)
 		}
 
 		const int groupIndex = std::clamp(b.group, 0, 15);
-		const short group = static_cast<short>(ToCollisionGroupBit(groupIndex));
+		const short group = static_cast<short>(static_cast<int>(ToCollisionGroupBit(groupIndex)));
 		short mask = static_cast<short>(ToBulletCollisionMask(b.groupMask, m_useDirectCollisionMaskSemantics));
-		if (std::getenv("MMD_PHYSICS_DISABLE_RIGID_COLLISION"))
+		static const bool s_disableRigidCollision = (std::getenv("MMD_PHYSICS_DISABLE_RIGID_COLLISION") != nullptr);
+		if (s_disableRigidCollision)
 		{
 			mask = 0;
 		}
@@ -2359,7 +2368,8 @@ void MmdPhysicsWorld::RunRealBulletFixedStep(float fixedStepDt)
 	if (dt > 0.0f)
 	{
 		const float fixedTimeStep = std::max(1.0e-4f, m_settings.fixedTimeStep);
-		m_btWorld->stepSimulation(dt, 1, fixedTimeStep);
+		const float effectiveDt = std::max(dt, fixedTimeStep);
+		m_btWorld->stepSimulation(effectiveDt, 1, fixedTimeStep);
 	}
 
 	for (size_t i = 0; i < m_bodies.size(); ++i)

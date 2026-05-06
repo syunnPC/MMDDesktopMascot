@@ -133,6 +133,7 @@ private:
 	HWND m_aaModeCombo{};
 	HWND m_msaaSamplesCombo{};
 	HWND m_shadowResolutionCombo{};
+	HWND m_toonDebugViewCombo{};
 	HWND m_toonContrastSlider{};
 	HWND m_toonContrastLabel{};
 	HWND m_shadowHueSlider{};

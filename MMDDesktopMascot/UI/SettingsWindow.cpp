@@ -78,6 +78,7 @@ namespace
 	constexpr int ID_OUTLINE_ENABLE = 158;
 	constexpr int ID_OUTLINE_STRENGTH_SLIDER = 159;
 	constexpr int ID_OUTLINE_OPACITY_SLIDER = 160;
+	constexpr int ID_TOON_DEBUG_VIEW_COMBO = 161;
 
 	constexpr int ID_SHADOW_DEEP_THRESH_SLIDER = 148;
 	constexpr int ID_SHADOW_DEEP_SOFT_SLIDER = 149;
@@ -499,6 +500,13 @@ namespace
 				SegTabsInvalidate(hwnd);
 				return 0;
 			}
+			case WM_CAPTURECHANGED:
+			{
+				if (!st) break;
+				st->pressed = -1;
+				SegTabsInvalidate(hwnd);
+				return 0;
+			}
 			case WM_LBUTTONUP:
 			{
 				if (!st) break;
@@ -555,7 +563,20 @@ namespace
 				GetClientRect(hwnd, &rcClient);
 
 				HDC memDC = CreateCompatibleDC(hdc);
-				HBITMAP memBmp = CreateCompatibleBitmap(hdc, std::max(1l, rcClient.right - rcClient.left), std::max(1l, rcClient.bottom - rcClient.top));
+				if (!memDC)
+				{
+					EndPaint(hwnd, &ps);
+					return 0;
+				}
+				int bmpW = std::max(1l, rcClient.right - rcClient.left);
+				int bmpH = std::max(1l, rcClient.bottom - rcClient.top);
+				HBITMAP memBmp = CreateCompatibleBitmap(hdc, bmpW, bmpH);
+				if (!memBmp)
+				{
+					DeleteDC(memDC);
+					EndPaint(hwnd, &ps);
+					return 0;
+				}
 				HGDIOBJ oldBmp = SelectObject(memDC, memBmp);
 
 
@@ -1110,6 +1131,35 @@ void SettingsWindow::CreateControls()
 	AddTooltip(m_shadowResolutionCombo, L"自己影シャドウマップの解像度です。大きいほど輪郭は安定しますが重くなります。");
 	y += rowH;
 
+	CreateLabel(L"デバッグ表示:", xPadding, y, labelW);
+	m_toonDebugViewCombo = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
+										   xPadding + labelW, y, 220, 280, parent, ControlIdToMenuHandle(ID_TOON_DEBUG_VIEW_COMBO), m_hInst, nullptr);
+	SetModernFont(m_toonDebugViewCombo);
+	SetDarkTheme(m_toonDebugViewCombo);
+	{
+		const wchar_t* labels[] = {
+			L"最終結果",
+			L"BaseColor",
+			L"ShadowColor",
+			L"NdotL",
+			L"SpecularMask",
+			L"Normal",
+			L"MaterialID",
+			L"OutlineMask",
+			L"DepthEdge",
+			L"NormalEdge",
+			L"MaterialEdge",
+			L"FinalOutline",
+			L"Rim"
+		};
+		for (int index = 0; index < static_cast<int>(std::size(labels)); ++index)
+		{
+			SendMessageW(m_toonDebugViewCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(labels[index]));
+		}
+	}
+	AddTooltip(m_toonDebugViewCombo, L"トゥーンレンダリング用の中間バッファを表示します。調整後は最終結果に戻してください。");
+	y += rowH;
+
 	CreateLabel(L"コントラスト:", xPadding, y, labelW);
 	m_toonContrastSlider = CreateSlider(ID_TOON_CONTRAST_SLIDER, xPadding + labelW, y, sliderW);
 	SendMessageW(m_toonContrastSlider, TBM_SETRANGE, TRUE, MAKELONG(50, 250));
@@ -1508,6 +1558,7 @@ void SettingsWindow::LoadLightSettings(const LightSettings& light)
 	SendMessageW(m_aaModeCombo, CB_SETCURSEL, static_cast<WPARAM>(std::clamp(light.antiAliasingMode, 0, 3)), 0);
 	SetComboSelectionByItemData(m_msaaSamplesCombo, light.msaaSampleCount);
 	SetComboSelectionByItemData(m_shadowResolutionCombo, light.shadowMapSize);
+	SendMessageW(m_toonDebugViewCombo, CB_SETCURSEL, static_cast<WPARAM>(std::clamp(light.toonDebugView, 0, 12)), 0);
 	UpdateLightDependentControlState(light);
 }
 
@@ -1764,6 +1815,7 @@ void SettingsWindow::BuildLightSettingsFromUi(LightSettings& light) const
 	light.antiAliasingMode = std::clamp(static_cast<int>(SendMessageW(m_aaModeCombo, CB_GETCURSEL, 0, 0)), 0, 3);
 	light.msaaSampleCount = GetComboSelectionItemData(m_msaaSamplesCombo, light.msaaSampleCount);
 	light.shadowMapSize = GetComboSelectionItemData(m_shadowResolutionCombo, light.shadowMapSize);
+	light.toonDebugView = std::clamp(static_cast<int>(SendMessageW(m_toonDebugViewCombo, CB_GETCURSEL, 0, 0)), 0, 12);
 	light.faceMaterialOverridesEnabled = IsChecked(m_faceMaterialOverridesCheck);
 }
 
@@ -2027,6 +2079,7 @@ LRESULT SettingsWindow::WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
 				case ID_AA_MODE_COMBO:
 				case ID_MSAA_SAMPLES_COMBO:
 				case ID_SHADOW_RESOLUTION_COMBO:
+				case ID_TOON_DEBUG_VIEW_COMBO:
 					if (HIWORD(wParam) == CBN_SELCHANGE)
 					{
 						UpdateLightPreview();

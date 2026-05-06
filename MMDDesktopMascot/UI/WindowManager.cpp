@@ -183,7 +183,14 @@ WindowManager::~WindowManager()
 		DestroyWindow(m_gizmoWnd);
 	}
 
-	if (m_gizmoOldBmp && m_gizmoDc) SelectObject(m_gizmoDc, m_gizmoOldBmp);
+	if (m_gizmoOldBmp && m_gizmoDc)
+	{
+		HGDIOBJ prev = SelectObject(m_gizmoDc, m_gizmoOldBmp);
+		if (prev != nullptr && prev != HGDI_ERROR)
+		{
+			DeleteObject(prev);
+		}
+	}
 	if (m_gizmoBmp) DeleteObject(m_gizmoBmp);
 	if (m_gizmoDc) DeleteDC(m_gizmoDc);
 }
