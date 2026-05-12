@@ -14,7 +14,7 @@ namespace Win32UiUtil
 	SIZE GetClientSize(HWND hwnd);
 	RECT GetWorkArea();
 
-	void RequireWindows11();
+	void RequireWindows11(bool bypassVersionCheck = false);
 	void EnablePerMonitorDpiAwareness();
 
 	void EnableImmersiveDarkMode(HWND hwnd);

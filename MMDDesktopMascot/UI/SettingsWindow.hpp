@@ -1,6 +1,7 @@
 #pragma once
 #include <windows.h>
 #include <string>
+#include <vector>
 
 #include "Settings.hpp"
 
@@ -43,10 +44,13 @@ private:
 	void BuildPhysicsSettingsFromUi(PhysicsSettings& physics) const;
 	void ApplyAndSave();
 	void UpdateLightPreview();
-	void UpdateFaceMaterialControlState();
 	bool PickColor(float& r, float& g, float& b, HWND btnHwnd);
 	void UpdateFpsControlState();
+	void UpdateRenderResolutionControlState();
 	void UpdatePhysicsAdvancedVisibility();
+	void ShowSection(int tabIndex);
+	void TogglePhysicsAdvanced();
+	void RepositionActionButtons(int y);
 
 	void SetHeaderFont(HWND hChild);
 	void SetModernFont(HWND hChild);
@@ -76,18 +80,18 @@ private:
 
 	int m_totalContentHeight{ 0 };
 	int m_scrollY{ 0 };
-	int m_lastAutoNavIndex{ -1 };
-	int m_sectionYBasic{ 0 };
-	int m_sectionYLight{ 0 };
-	int m_sectionYToon{ 0 };
-	int m_sectionYPhysics{ 0 };
 
 	int m_headerHeight{ 52 };
 	int m_footerHeight{ 58 };
-	int m_anchorBasicY{ 0 };
-	int m_anchorLightY{ 0 };
-	int m_anchorToonY{ 0 };
-	int m_anchorPhysicsY{ 0 };
+
+	// タブページ管理
+	int m_activeTab{ 0 };
+	int m_tabContentHeight[4]{};
+	std::vector<HWND> m_tabControls[4];
+	std::vector<HWND> m_physicsAdvancedControls;
+	bool m_physicsAdvancedExpanded{ false };
+	HWND m_physicsAdvancedToggle{};
+	int m_physicsAdvancedContentHeight{ 0 };
 
 	// 基本設定
 	HWND m_modelPathEdit{};
@@ -98,6 +102,10 @@ private:
 	HWND m_unlimitedFpsCheck{};
 	HWND m_limitMonitorRefreshRateCheck{};
 	HWND m_vsyncCheck{};
+	HWND m_renderResolutionModeCombo{};
+	HWND m_renderScaleEdit{};
+	HWND m_renderCustomWidthEdit{};
+	HWND m_renderCustomHeightEdit{};
 
 	// プリセット設定
 	HWND m_presetModeCombo{};
@@ -125,11 +133,24 @@ private:
 	// Toon Control
 	HWND m_toonEnableCheck{};
 	HWND m_selfShadowCheck{};
+	HWND m_ssaoCheck{};
+	HWND m_ssaoIntensitySlider{};
+	HWND m_ssaoIntensityLabel{};
 	HWND m_outlineCheck{};
+	HWND m_outlineSilhouetteModeCheck{};
+	HWND m_outlineSilhouetteAngleSlider{};
+	HWND m_outlineSilhouetteAngleLabel{};
 	HWND m_outlineStrengthSlider{};
 	HWND m_outlineStrengthLabel{};
 	HWND m_outlineOpacitySlider{};
 	HWND m_outlineOpacityLabel{};
+	HWND m_nonSilhouetteOutlineCheck{};
+	HWND m_nonSilhouetteOutlineWidthSlider{};
+	HWND m_nonSilhouetteOutlineWidthLabel{};
+	HWND m_nonSilhouetteOutlineOpacitySlider{};
+	HWND m_nonSilhouetteOutlineOpacityLabel{};
+	HWND m_nonSilhouetteOutlineAngleSlider{};
+	HWND m_nonSilhouetteOutlineAngleLabel{};
 	HWND m_aaModeCombo{};
 	HWND m_msaaSamplesCombo{};
 	HWND m_shadowResolutionCombo{};
@@ -156,13 +177,6 @@ private:
 	HWND m_rimIntensityLabel{};
 	HWND m_specularStepSlider{};
 	HWND m_specularStepLabel{};
-
-	// Face Control
-	HWND m_faceMaterialOverridesCheck{};
-	HWND m_faceShadowMulSlider{};
-	HWND m_faceShadowMulLabel{};
-	HWND m_faceContrastMulSlider{};
-	HWND m_faceContrastMulLabel{};
 
 	// Direction
 	HWND m_keyDirXSlider{};
@@ -191,12 +205,7 @@ private:
 	HWND m_physicsGlobalDampingScaleEdit{};
 	HWND m_physicsVelocitySettleThresholdEdit{};
 	HWND m_physicsMinAngularDampingEdit{};
-	int m_physicsAdvancedHeight{ 0 };
-	int m_physicsAdvancedStartY{ 0 };
-	int m_physicsAdvancedEndY{ 0 };
-	int m_physicsActionsExpandedY{ 0 };
-	int m_physicsExpandedContentHeight{ 0 };
-	int m_physicsCollapsedContentHeight{ 0 };
+
 
 	HWND m_resetLightBtn{};
 	HWND m_savePresetBtn{};
@@ -207,6 +216,7 @@ private:
 	HWND m_applyBtn{};
 
 	bool m_created{ false };
+	bool m_loadingSettings{ false };
 	COLORREF m_customColors[16]{};
 	AppSettings m_backupSettings{};
 };

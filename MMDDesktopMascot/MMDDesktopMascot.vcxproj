@@ -155,6 +155,15 @@
     <None Include="Rendering\Shaders\SkinningCommon.hlsli">
       <FileType>Document</FileType>
     </None>
+    <None Include="Rendering\Shaders\SMAA_Blend_PS.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="Rendering\Shaders\SMAA_Edge_PS.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="Rendering\Shaders\SMAA_Neighborhood_PS.hlsl">
+      <FileType>Document</FileType>
+    </None>
     <None Include="Rendering\Shaders\ToonComposite_PS.hlsl">
       <FileType>Document</FileType>
     </None>

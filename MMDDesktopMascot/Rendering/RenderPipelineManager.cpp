@@ -29,6 +29,7 @@ namespace
 	constexpr DXGI_FORMAT kAuxToonRenderTargetFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 	constexpr DXGI_FORMAT kAuxOutlineRenderTargetFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 	constexpr DXGI_FORMAT kAuxEdgeColorRenderTargetFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+	constexpr DXGI_FORMAT kSmaaWeightsFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 	const D3D12_INPUT_ELEMENT_DESC kPmxInputLayout[] = {
 		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
 		{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
@@ -590,6 +591,59 @@ void RenderPipelineManager::CreateEdgePipeline(UINT msaaSampleCount, UINT msaaQu
 	CreateGraphicsPipelineState(m_ctx->Device(), pso, m_edgePso);
 }
 
+void RenderPipelineManager::CreateEdgeCapturePipeline(UINT msaaSampleCount, UINT msaaQuality)
+{
+	if (!m_pmxRootSig)
+	{
+		CreatePmxRootSignature();
+	}
+
+	const auto vsBlob = LoadOrCompileShader(
+		L"Edge_VS.hlsl",
+		L"Compiled_Edge_VS.cso",
+		"VSMain",
+		"vs_5_0",
+		D3DCOMPILE_OPTIMIZATION_LEVEL3,
+		"D3DCompile Edge Capture VS");
+	const auto psBlob = LoadOrCompileShader(
+		L"Edge_PS.hlsl",
+		L"Compiled_Edge_PS.cso",
+		"PSMain",
+		"ps_5_0",
+		D3DCOMPILE_OPTIMIZATION_LEVEL3,
+		"D3DCompile Edge Capture PS");
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC pso{};
+	pso.pRootSignature = m_pmxRootSig.get();
+	pso.VS = MakeShaderBytecode(vsBlob.get());
+	pso.PS = MakeShaderBytecode(psBlob.get());
+	pso.InputLayout = { kPmxInputLayout, _countof(kPmxInputLayout) };
+	pso.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+	pso.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+	pso.RasterizerState.CullMode = D3D12_CULL_MODE_FRONT;
+	pso.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+	pso.DepthStencilState.DepthEnable = TRUE;
+	pso.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+	pso.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+	pso.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+	auto& rt = pso.BlendState.RenderTarget[0];
+	rt.BlendEnable = TRUE;
+	rt.SrcBlend = D3D12_BLEND_ONE;
+	rt.DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
+	rt.BlendOp = D3D12_BLEND_OP_ADD;
+	rt.SrcBlendAlpha = D3D12_BLEND_ONE;
+	rt.DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
+	rt.BlendOpAlpha = D3D12_BLEND_OP_ADD;
+	pso.SampleMask = UINT_MAX;
+	pso.NumRenderTargets = 1;
+	pso.RTVFormats[0] = kAuxEdgeColorRenderTargetFormat;
+	pso.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+	pso.SampleDesc.Count = msaaSampleCount;
+	pso.SampleDesc.Quality = msaaQuality;
+
+	CreateGraphicsPipelineState(m_ctx->Device(), pso, m_edgeCapturePso);
+}
+
 void RenderPipelineManager::CreateShadowPipeline()
 {
 	if (!m_pmxRootSig)
@@ -635,7 +689,7 @@ void RenderPipelineManager::CreatePostProcessRootSignature()
 {
 	CD3DX12_ROOT_PARAMETER params[10]{};
 
-	params[0].InitAsConstants(20, 0);
+	params[0].InitAsConstants(28, 0);
 
 	CD3DX12_DESCRIPTOR_RANGE sceneSrvRange{};
 	sceneSrvRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
@@ -787,6 +841,72 @@ void RenderPipelineManager::CreateToonCompositePipeline()
 	pso.SampleDesc.Count = 1;
 
 	DX_CALL(m_ctx->Device()->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(m_toonCompositePso.put())));
+}
+
+void RenderPipelineManager::CreateSmaaPipelines()
+{
+	if (!m_postProcessRootSig)
+	{
+		CreatePostProcessRootSignature();
+	}
+
+	const auto vsBlob = LoadOrCompileShader(
+		L"FXAA_VS.hlsl",
+		L"Compiled_FXAA_VS.cso",
+		"VSMain",
+		"vs_5_0",
+		D3DCOMPILE_OPTIMIZATION_LEVEL3,
+		"D3DCompile SMAA VS");
+
+	auto makePso = [&](std::wstring_view shaderName,
+					   std::wstring_view compiledName,
+					   DXGI_FORMAT renderTargetFormat,
+					   const char* debugLabel,
+					   winrt::com_ptr<ID3D12PipelineState>& outPso) {
+		const auto psBlob = LoadOrCompileShader(
+			shaderName,
+			compiledName,
+			"PSMain",
+			"ps_5_0",
+			D3DCOMPILE_OPTIMIZATION_LEVEL3,
+			debugLabel);
+
+		D3D12_GRAPHICS_PIPELINE_STATE_DESC pso{};
+		pso.pRootSignature = m_postProcessRootSig.get();
+		pso.VS = MakeShaderBytecode(vsBlob.get());
+		pso.PS = MakeShaderBytecode(psBlob.get());
+		pso.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+		pso.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+		pso.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+		pso.DepthStencilState.DepthEnable = FALSE;
+		pso.DepthStencilState.StencilEnable = FALSE;
+		pso.SampleMask = UINT_MAX;
+		pso.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+		pso.NumRenderTargets = 1;
+		pso.RTVFormats[0] = renderTargetFormat;
+		pso.SampleDesc.Count = 1;
+
+		DX_CALL(m_ctx->Device()->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(outPso.put())));
+	};
+
+	makePso(
+		L"SMAA_Edge_PS.hlsl",
+		L"Compiled_SMAA_Edge_PS.cso",
+		kSmaaWeightsFormat,
+		"D3DCompile SMAA Edge PS",
+		m_smaaEdgePso);
+	makePso(
+		L"SMAA_Blend_PS.hlsl",
+		L"Compiled_SMAA_Blend_PS.cso",
+		kSmaaWeightsFormat,
+		"D3DCompile SMAA Blend PS",
+		m_smaaBlendPso);
+	makePso(
+		L"SMAA_Neighborhood_PS.hlsl",
+		L"Compiled_SMAA_Neighborhood_PS.cso",
+		kSceneRenderTargetFormat,
+		"D3DCompile SMAA Neighborhood PS",
+		m_smaaNeighborhoodPso);
 }
 
 void RenderPipelineManager::CreateToneMapPipeline()

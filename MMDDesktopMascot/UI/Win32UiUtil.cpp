@@ -172,8 +172,13 @@ namespace Win32UiUtil
 		return workArea;
 	}
 
-	void RequireWindows11()
+	void RequireWindows11(bool bypassVersionCheck)
 	{
+		if (bypassVersionCheck)
+		{
+			return;
+		}
+
 		const OSVERSIONINFOEXW versionInfo = GetWindowsVersion();
 		if (versionInfo.dwMajorVersion > 10)
 		{

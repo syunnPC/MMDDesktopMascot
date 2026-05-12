@@ -16,7 +16,9 @@ enum class AntiAliasingMode
 	Off = 0,
 	Fxaa = 1,
 	Msaa = 2,
-	MsaaFxaa = 3
+	MsaaFxaa = 3,
+	Smaa = 4,
+	MsaaSmaa = 5
 };
 
 enum class ToonDebugView
@@ -36,6 +38,13 @@ enum class ToonDebugView
 	Rim = 12
 };
 
+enum class RenderResolutionMode
+{
+	ClientSize = 0,
+	ScalePercent = 1,
+	Custom = 2
+};
+
 struct LightSettings
 {
 	float brightness = 1.5f;
@@ -50,7 +59,7 @@ struct LightSettings
 	float keyLightColorR = 1.0f;
 	float keyLightColorG = 1.0f;
 	float keyLightColorB = 1.0f;
-	float keyLightIntensity = 1.6f;
+	float keyLightIntensity = 1.2f;
 
 
 	float fillLightDirX = -0.65f;
@@ -65,11 +74,17 @@ struct LightSettings
 	float modelScale = 1.0f;
 	float outlineWidthScale = 1.0f;
 	float outlineOpacityScale = 1.0f;
+	float outlineSilhouetteAngleTolerance = 0.0f;
+	float outlineNonSilhouetteWidthScale = 1.0f;
+	float outlineNonSilhouetteOpacityScale = 1.0f;
+	float outlineNonSilhouetteAngleTolerance = 0.45f;
 
 
 	bool toonEnabled = true;
 	bool selfShadowEnabled = true;
 	bool outlineEnabled = true;
+	bool outlineSilhouetteModeEnabled = false;
+	bool outlineNonSilhouetteEnabled = true;
 	int antiAliasingMode = static_cast<int>(AntiAliasingMode::MsaaFxaa);
 	int msaaSampleCount = 2;
 	int shadowMapSize = 1024;
@@ -77,7 +92,7 @@ struct LightSettings
 	float shadowHueShiftDeg = -8.0f;
 	float shadowSaturationBoost = 0.25f;
 	float rimWidth = 0.6f;
-	float rimIntensity = 0.35f;
+	float rimIntensity = 0.25f;
 	float specularStep = 0.3f;
 
 	float shadowRampShift = 0.0f;
@@ -85,10 +100,6 @@ struct LightSettings
 	float shadowDeepThreshold = 0.28f;
 	float shadowDeepSoftness = 0.03f;
 	float shadowDeepMul = 0.65f;
-
-	bool faceMaterialOverridesEnabled = true;
-	float faceShadowMul = 0.0f;
-	float faceToonContrastMul = 0.9f;
 
 	// Post-processing settings
 	bool ssaoEnabled = true;
@@ -156,6 +167,10 @@ struct AppSettings
 
 	int windowWidth{ 0 };
 	int windowHeight{ 0 };
+	int renderResolutionMode{ static_cast<int>(RenderResolutionMode::ClientSize) };
+	int renderScalePercent{ 100 };
+	int renderCustomWidth{ 0 };
+	int renderCustomHeight{ 0 };
 
 
 	PresetMode globalPresetMode{ PresetMode::Ask };

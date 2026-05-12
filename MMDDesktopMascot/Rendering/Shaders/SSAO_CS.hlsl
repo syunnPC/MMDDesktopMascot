@@ -1,34 +1,56 @@
 // SSAO_CS.hlsl
-// Screen-space ambient occlusion using depth derivatives for normals.
-// Reconstructed from CS_ScreenSpaceAO_Resolve_Reconstructed.hlsl patterns.
+// Full-resolution screen-space ambient occlusion from scene depth.
 
-Texture2D<float> g_sceneDepth : register(t0);
+Texture2D<float4> g_sceneDepth : register(t0);
 RWTexture2D<float> g_outAO : register(u0);
 SamplerState g_pointClamp : register(s1);
 
 cbuffer SSAOCB : register(b0)
 {
     row_major float4x4 g_invProj;
+    float2 g_invScreenSize;
+    float g_radius;
+    float g_bias;
+    float g_intensity;
+    float g_power;
+    float g_useProxyDepth;
+    float _pad0;
 };
 
-#define AO_RADIUS 0.5f
-#define AO_INTENSITY 1.2f
-#define NUM_SAMPLES 8
+#define NUM_SAMPLES 16
 
 static const float2 g_sampleOffsets[NUM_SAMPLES] = {
-    float2(0.355512, -0.709318),
-    float2(0.534336, 0.283099),
-    float2(-0.876571, 0.656315),
-    float2(-0.074451, -0.916279),
-    float2(0.101453, 0.687098),
-    float2(-0.588007, -0.356506),
-    float2(0.365531, 0.155641),
-    float2(-0.259657, 0.741338)
+    float2( 0.5381,  0.1856),
+    float2(-0.4319,  0.2523),
+    float2( 0.1807, -0.4521),
+    float2(-0.0720, -0.7819),
+    float2( 0.6145, -0.3988),
+    float2(-0.7712, -0.2414),
+    float2( 0.3724,  0.6869),
+    float2(-0.3177,  0.7028),
+    float2( 0.8664,  0.1326),
+    float2(-0.9090,  0.1513),
+    float2( 0.0905,  0.9530),
+    float2(-0.1100, -0.9850),
+    float2( 0.6462,  0.5811),
+    float2(-0.5431, -0.6714),
+    float2( 0.2827, -0.8912),
+    float2(-0.7631,  0.5299)
 };
+
+float ReadDepth(float2 uv)
+{
+    float4 d = g_sceneDepth.SampleLevel(g_pointClamp, saturate(uv), 0);
+    return lerp(d.r, d.a, step(0.5f, g_useProxyDepth));
+}
+
+bool IsValidDepth(float depth)
+{
+    return depth > 1.0e-5f && depth < 0.99999f;
+}
 
 float3 ViewSpacePositionFromDepth(float2 uv, float rawDepth)
 {
-    // Map UV [0,1] to clip space [-1,1] (flip Y because UV v=0 is top, clip Y=1 is top)
     float2 clipPos = float2(uv.x * 2.0f - 1.0f, 1.0f - uv.y * 2.0f);
     float4 clipH = float4(clipPos, rawDepth, 1.0f);
     float4 viewPos = mul(clipH, g_invProj);
@@ -36,18 +58,53 @@ float3 ViewSpacePositionFromDepth(float2 uv, float rawDepth)
     return viewPos.xyz;
 }
 
-float3 ReconstructNormalFromDepth(float2 uv, float2 texelSize)
+float3 SafeViewSpacePosition(float2 uv, float3 fallbackPos)
 {
-    float d0 = g_sceneDepth.SampleLevel(g_pointClamp, uv, 0);
-    float d1 = g_sceneDepth.SampleLevel(g_pointClamp, uv + float2(texelSize.x, 0), 0);
-    float d2 = g_sceneDepth.SampleLevel(g_pointClamp, uv + float2(0, texelSize.y), 0);
+    float depth = ReadDepth(uv);
+    return IsValidDepth(depth) ? ViewSpacePositionFromDepth(uv, depth) : fallbackPos;
+}
 
-    float3 v0 = float3(0, 0, d0);
-    float3 v1 = float3(texelSize.x, 0, d1);
-    float3 v2 = float3(0, texelSize.y, d2);
+float3 ReconstructNormalFromDepth(float2 uv, float3 centerPos)
+{
+    float2 texel = g_invScreenSize;
+    float3 left = SafeViewSpacePosition(uv - float2(texel.x, 0.0f), centerPos);
+    float3 right = SafeViewSpacePosition(uv + float2(texel.x, 0.0f), centerPos);
+    float3 up = SafeViewSpacePosition(uv - float2(0.0f, texel.y), centerPos);
+    float3 down = SafeViewSpacePosition(uv + float2(0.0f, texel.y), centerPos);
 
-    float3 n = cross(v1 - v0, v2 - v0);
-    return normalize(n);
+    float3 dx = (abs(right.z - centerPos.z) < abs(centerPos.z - left.z))
+        ? (right - centerPos)
+        : (centerPos - left);
+    float3 dy = (abs(down.z - centerPos.z) < abs(centerPos.z - up.z))
+        ? (down - centerPos)
+        : (centerPos - up);
+
+    float3 normal = cross(dx, dy);
+    float lenSq = dot(normal, normal);
+    if (lenSq <= 1.0e-8f)
+    {
+        return normalize(-centerPos);
+    }
+
+    normal *= rsqrt(lenSq);
+    if (dot(normal, -centerPos) < 0.0f)
+    {
+        normal = -normal;
+    }
+    return normal;
+}
+
+float InterleavedGradientNoise(uint2 p)
+{
+    return frac(52.9829189f * frac(dot(float2(p), float2(0.06711056f, 0.00583715f))));
+}
+
+float2 Rotate(float2 v, float angle)
+{
+    float s;
+    float c;
+    sincos(angle, s, c);
+    return float2(v.x * c - v.y * s, v.x * s + v.y * c);
 }
 
 [numthreads(8, 8, 1)]
@@ -58,39 +115,60 @@ void MainCS(uint2 tid : SV_DispatchThreadID)
     if (any(tid >= outputSize))
         return;
 
-    float2 uv = (tid + 0.5f) / float2(outputSize);
-    float2 texelSize = 1.0f / float2(outputSize);
+    float2 uv = (float2(tid) + 0.5f) / float2(outputSize);
 
-    float depth = g_sceneDepth.SampleLevel(g_pointClamp, uv, 0);
-    if (depth >= 1.0f || depth <= 0.0f)
+    float depth = ReadDepth(uv);
+    if (!IsValidDepth(depth))
     {
         g_outAO[tid] = 1.0f;
         return;
     }
 
     float3 centerPos = ViewSpacePositionFromDepth(uv, depth);
-    float3 centerNormal = ReconstructNormalFromDepth(uv, texelSize);
+    float3 centerNormal = ReconstructNormalFromDepth(uv, centerPos);
+    float viewZ = max(centerPos.z, 0.05f);
+    float radius = max(g_radius, 1.0e-4f);
+    float radiusSq = radius * radius;
 
+    float invProjX = max(abs(g_invProj._11), 1.0e-4f);
+    float invProjY = max(abs(g_invProj._22), 1.0e-4f);
+    float2 projScale = float2(1.0f / invProjX, 1.0f / invProjY);
+    float2 radiusUv = 0.5f * radius * projScale / viewZ;
+    radiusUv = clamp(radiusUv, g_invScreenSize * 1.5f, g_invScreenSize * 48.0f);
+
+    float rotation = InterleavedGradientNoise(tid) * 6.2831853f;
     float occlusion = 0.0f;
-    float radius = AO_RADIUS;
+    float weight = 0.0f;
 
     [unroll]
     for (int i = 0; i < NUM_SAMPLES; ++i)
     {
-        float2 sampleOffset = g_sampleOffsets[i] * radius * texelSize;
-        float2 sampleUV = uv + sampleOffset;
-        float sampleDepth = g_sceneDepth.SampleLevel(g_pointClamp, sampleUV, 0);
+        float sampleScale = (float(i) + 1.0f) / float(NUM_SAMPLES);
+        sampleScale = lerp(0.18f, 1.0f, sampleScale * sampleScale);
+        float2 sampleUV = uv + Rotate(g_sampleOffsets[i], rotation) * radiusUv * sampleScale;
+        float sampleDepth = ReadDepth(sampleUV);
+        if (!IsValidDepth(sampleDepth))
+        {
+            continue;
+        }
 
         float3 samplePos = ViewSpacePositionFromDepth(sampleUV, sampleDepth);
-        float3 diff = samplePos - centerPos;
-        float dist = length(diff);
-        float3 diffNorm = diff / max(dist, 1e-5f);
+        float3 v = samplePos - centerPos;
+        float distSq = dot(v, v);
+        if (distSq <= 1.0e-8f || distSq >= radiusSq)
+        {
+            continue;
+        }
 
-        float dotNL = saturate(dot(centerNormal, diffNorm));
-        float rangeCheck = saturate(1.0f - dist * dist / (radius * radius));
-        occlusion += dotNL * rangeCheck;
+        float invDist = rsqrt(distSq);
+        float nDotV = saturate(dot(centerNormal, v) * invDist - g_bias);
+        float range = saturate(1.0f - distSq / radiusSq);
+        range = range * range * (3.0f - 2.0f * range);
+        occlusion += nDotV * range;
+        weight += 1.0f;
     }
 
-    float ao = 1.0f - (occlusion / NUM_SAMPLES) * AO_INTENSITY;
-    g_outAO[tid] = saturate(ao);
+    float ao = 1.0f - (occlusion / max(weight, 1.0f)) * max(g_intensity, 0.0f);
+    ao = pow(saturate(ao), max(g_power, 0.25f));
+    g_outAO[tid] = ao;
 }

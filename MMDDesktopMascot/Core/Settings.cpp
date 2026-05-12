@@ -426,6 +426,10 @@ namespace
 		{ L"modelScale", &LightSettings::modelScale },
 		{ L"outlineWidthScale", &LightSettings::outlineWidthScale },
 		{ L"outlineOpacityScale", &LightSettings::outlineOpacityScale },
+		{ L"outlineSilhouetteAngleTolerance", &LightSettings::outlineSilhouetteAngleTolerance },
+		{ L"outlineNonSilhouetteWidthScale", &LightSettings::outlineNonSilhouetteWidthScale },
+		{ L"outlineNonSilhouetteOpacityScale", &LightSettings::outlineNonSilhouetteOpacityScale },
+		{ L"outlineNonSilhouetteAngleTolerance", &LightSettings::outlineNonSilhouetteAngleTolerance },
 		{ L"toonContrast", &LightSettings::toonContrast },
 		{ L"shadowHueShiftDeg", &LightSettings::shadowHueShiftDeg },
 		{ L"shadowSaturationBoost", &LightSettings::shadowSaturationBoost },
@@ -436,8 +440,6 @@ namespace
 		{ L"shadowDeepThreshold", &LightSettings::shadowDeepThreshold },
 		{ L"shadowDeepSoftness", &LightSettings::shadowDeepSoftness },
 		{ L"shadowDeepMul", &LightSettings::shadowDeepMul },
-		{ L"faceShadowMul", &LightSettings::faceShadowMul },
-		{ L"faceToonContrastMul", &LightSettings::faceToonContrastMul },
 		{ L"ssaoIntensity", &LightSettings::ssaoIntensity },
 		{ L"bloomIntensity", &LightSettings::bloomIntensity },
 		{ L"exposure", &LightSettings::exposure },
@@ -455,7 +457,8 @@ namespace
 		{ L"toonEnabled", &LightSettings::toonEnabled },
 		{ L"selfShadowEnabled", &LightSettings::selfShadowEnabled },
 		{ L"outlineEnabled", &LightSettings::outlineEnabled },
-		{ L"faceMaterialOverridesEnabled", &LightSettings::faceMaterialOverridesEnabled },
+		{ L"outlineSilhouetteModeEnabled", &LightSettings::outlineSilhouetteModeEnabled },
+		{ L"outlineNonSilhouetteEnabled", &LightSettings::outlineNonSilhouetteEnabled },
 		{ L"ssaoEnabled", &LightSettings::ssaoEnabled },
 		{ L"bloomEnabled", &LightSettings::bloomEnabled },
 		{ L"normalMapEnabled", &LightSettings::normalMapEnabled },
@@ -488,6 +491,10 @@ namespace
 		{ L"trayMenuTheme", &AppSettings::trayMenuThemeId },
 		{ L"windowWidth", &AppSettings::windowWidth },
 		{ L"windowHeight", &AppSettings::windowHeight },
+		{ L"renderResolutionMode", &AppSettings::renderResolutionMode },
+		{ L"renderScalePercent", &AppSettings::renderScalePercent },
+		{ L"renderCustomWidth", &AppSettings::renderCustomWidth },
+		{ L"renderCustomHeight", &AppSettings::renderCustomHeight },
 	};
 
 	constexpr BoolFieldDesc<AppSettings> kAppBoolFields[] = {
@@ -502,6 +509,35 @@ namespace
 
 	void ParseLightSettingLine(const std::wstring& key, const std::wstring& value, LightSettings& light)
 	{
+		if (key == L"outlineSilhouetteOnly")
+		{
+			const bool silhouetteOnly = ParseBool(value, false);
+			light.outlineSilhouetteModeEnabled = silhouetteOnly;
+			light.outlineNonSilhouetteEnabled = !silhouetteOnly;
+			return;
+		}
+
+		if (key == L"faceFeatureOutlineWidthScale")
+		{
+			light.outlineNonSilhouetteWidthScale = ParseFloat(value, light.outlineNonSilhouetteWidthScale);
+			return;
+		}
+		if (key == L"faceFeatureOutlineOpacityScale")
+		{
+			light.outlineNonSilhouetteOpacityScale = ParseFloat(value, light.outlineNonSilhouetteOpacityScale);
+			return;
+		}
+		if (key == L"faceFeatureOutlineAngleTolerance")
+		{
+			light.outlineNonSilhouetteAngleTolerance = ParseFloat(value, light.outlineNonSilhouetteAngleTolerance);
+			return;
+		}
+		if (key == L"faceFeatureOutlineEnabled")
+		{
+			light.outlineNonSilhouetteEnabled = ParseBool(value, light.outlineNonSilhouetteEnabled);
+			return;
+		}
+
 		if (ParseFloatField(key, value, light, kLightFloatFields)) return;
 		if (ParseIntField(key, value, light, kLightIntFields)) return;
 		(void)ParseBoolField(key, value, light, kLightBoolFields);
@@ -566,6 +602,19 @@ namespace
 		return (value >= kTrayMenuThemeIdMin && value <= kTrayMenuThemeIdMax) ? value : 0;
 	}
 
+	int NormalizeRenderResolutionMode(int value) noexcept
+	{
+		if (value < static_cast<int>(RenderResolutionMode::ClientSize))
+		{
+			return static_cast<int>(RenderResolutionMode::ClientSize);
+		}
+		if (value > static_cast<int>(RenderResolutionMode::Custom))
+		{
+			return static_cast<int>(RenderResolutionMode::Custom);
+		}
+		return value;
+	}
+
 	void NormalizeAppSettings(AppSettings& settings) noexcept
 	{
 		settings.targetFps = NormalizeTargetFps(settings.targetFps);
@@ -574,6 +623,16 @@ namespace
 			settings.unlimitedFps = false;
 		}
 		settings.trayMenuThemeId = NormalizeTrayMenuThemeId(settings.trayMenuThemeId);
+		settings.renderResolutionMode = NormalizeRenderResolutionMode(settings.renderResolutionMode);
+		settings.renderScalePercent = std::clamp(settings.renderScalePercent, 10, 800);
+		if (settings.renderCustomWidth > 0)
+		{
+			settings.renderCustomWidth = std::clamp(settings.renderCustomWidth, 16, 8192);
+		}
+		if (settings.renderCustomHeight > 0)
+		{
+			settings.renderCustomHeight = std::clamp(settings.renderCustomHeight, 16, 8192);
+		}
 	}
 
 	PresetMode ParsePresetModeValue(const std::wstring& value, PresetMode fallback)
@@ -783,6 +842,10 @@ bool operator==(const AppSettings& a, const AppSettings& b) noexcept
 		a.trayMenuThemeId == b.trayMenuThemeId &&
 		a.windowWidth == b.windowWidth &&
 		a.windowHeight == b.windowHeight &&
+		a.renderResolutionMode == b.renderResolutionMode &&
+		a.renderScalePercent == b.renderScalePercent &&
+		a.renderCustomWidth == b.renderCustomWidth &&
+		a.renderCustomHeight == b.renderCustomHeight &&
 		a.globalPresetMode == b.globalPresetMode &&
 		a.perModelPresetSettings == b.perModelPresetSettings &&
 		a.light == b.light &&

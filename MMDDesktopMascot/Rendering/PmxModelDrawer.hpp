@@ -66,7 +66,7 @@ public:
 		float normalMapIntensity{ 1.0f };
 		float materialIdNormalized{};
 		float edgeEnabled{};
-		float _pad1{};
+		float _pad3{};
 
 		DirectX::XMFLOAT4 shadowColorOverride{};
 		DirectX::XMFLOAT4 toonParams0{ -1.0f, -1.0f, 0.45f, 0.12f };

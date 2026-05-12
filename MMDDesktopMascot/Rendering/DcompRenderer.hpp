@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 #include <DirectXMath.h>
 #include <atomic>
 
@@ -35,7 +36,7 @@ public:
 
 	using ProgressCallback = std::function<void(float, const wchar_t*)>;
 
-	void Initialize(HWND hwnd, ProgressCallback progress = {});
+	void Initialize(HWND hwnd, bool useDirectComposition, ProgressCallback progress = {});
 	void Render(const MmdAnimator& animator);
 
 	void SetLightSettings(const LightSettings& light);
@@ -68,6 +69,7 @@ public:
 							  float startProgress, float endProgress);
 
 	void SetResizeOverlayEnabled(bool enabled);
+	void SetRenderResolutionSettings(int mode, int scalePercent, int customWidth, int customHeight);
 private:
 	void CreateD3D();
 	void CreateDirectCompositionTree();
@@ -76,6 +78,7 @@ private:
 	void CreateRenderTargets();
 	void WaitForGpu();
 	void ResizeIfNeeded();
+	std::pair<UINT, UINT> ComputeRenderSizeFromOutput(UINT outputWidth, UINT outputHeight) const;
 
     HWND m_hwnd{};
     Dx12Context m_ctx;
@@ -103,8 +106,15 @@ private:
     UINT m_rtvDescriptorSize{};
     winrt::com_ptr<ID3D12Resource> m_renderTargets[FrameCount];
 
+    UINT m_outputWidth{};
+    UINT m_outputHeight{};
     UINT m_width{};
     UINT m_height{};
+	int m_renderResolutionMode{ static_cast<int>(RenderResolutionMode::ClientSize) };
+	int m_renderScalePercent{ 100 };
+	int m_renderCustomWidth{ 0 };
+	int m_renderCustomHeight{ 0 };
+	bool m_renderResolutionDirty{ false };
 
     ProgressCallback m_progressCallback;
 
@@ -257,6 +267,9 @@ private:
         PP_AuxOutlineSrv,
         PP_AuxEdgeColorSrv,
         PP_ToonCompositeSrv,
+        PP_SmaaEdgesSrv,
+        PP_SmaaBlendSrv,
+        PP_SmaaOutputSrv,
         PP_DescriptorCount
     };
 
@@ -271,6 +284,9 @@ private:
         ToonRtv_MsaaAuxOutline,
         ToonRtv_MsaaAuxEdgeColor,
         ToonRtv_Composite,
+        ToonRtv_SmaaEdges,
+        ToonRtv_SmaaBlend,
+        ToonRtv_SmaaOutput,
         ToonRtv_Count
     };
 
@@ -285,6 +301,9 @@ private:
     D3D12_CPU_DESCRIPTOR_HANDLE m_msaaAuxOutlineRtvHandle{};
     D3D12_CPU_DESCRIPTOR_HANDLE m_msaaAuxEdgeColorRtvHandle{};
     D3D12_CPU_DESCRIPTOR_HANDLE m_toonCompositeRtvHandle{};
+    D3D12_CPU_DESCRIPTOR_HANDLE m_smaaEdgesRtvHandle{};
+    D3D12_CPU_DESCRIPTOR_HANDLE m_smaaBlendRtvHandle{};
+    D3D12_CPU_DESCRIPTOR_HANDLE m_smaaOutputRtvHandle{};
 
     winrt::com_ptr<ID3D12Resource> m_auxNormalTex;
     winrt::com_ptr<ID3D12Resource> m_auxToonTex;
@@ -306,6 +325,13 @@ private:
 
     winrt::com_ptr<ID3D12Resource> m_toonCompositeTex;
     D3D12_RESOURCE_STATES m_toonCompositeState = D3D12_RESOURCE_STATE_RENDER_TARGET;
+
+    winrt::com_ptr<ID3D12Resource> m_smaaEdgesTex;
+    winrt::com_ptr<ID3D12Resource> m_smaaBlendTex;
+    winrt::com_ptr<ID3D12Resource> m_smaaOutputTex;
+    D3D12_RESOURCE_STATES m_smaaEdgesState = D3D12_RESOURCE_STATE_RENDER_TARGET;
+    D3D12_RESOURCE_STATES m_smaaBlendState = D3D12_RESOURCE_STATE_RENDER_TARGET;
+    D3D12_RESOURCE_STATES m_smaaOutputState = D3D12_RESOURCE_STATE_RENDER_TARGET;
 
     winrt::com_ptr<ID3D12Resource> m_ssaoTex;
     D3D12_RESOURCE_STATES m_ssaoState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
@@ -346,4 +372,5 @@ private:
 
     bool m_resizeOverlayEnabled{ false };
 	bool m_vsyncEnabled{ false };
+	bool m_useDirectComposition{ true };
 };

@@ -60,6 +60,17 @@ float4 SampleScene(float2 uv)
     return g_sceneTex.SampleLevel(g_linearClamp, uv, 0);
 }
 
+float SampleSsao(float2 uv)
+{
+    float2 texel = g_invScreenSize;
+    float ao = g_ssaoTex.SampleLevel(g_linearClamp, uv, 0).r * 0.50f;
+    ao += g_ssaoTex.SampleLevel(g_linearClamp, uv + float2( texel.x, 0.0f), 0).r * 0.125f;
+    ao += g_ssaoTex.SampleLevel(g_linearClamp, uv + float2(-texel.x, 0.0f), 0).r * 0.125f;
+    ao += g_ssaoTex.SampleLevel(g_linearClamp, uv + float2(0.0f,  texel.y), 0).r * 0.125f;
+    ao += g_ssaoTex.SampleLevel(g_linearClamp, uv + float2(0.0f, -texel.y), 0).r * 0.125f;
+    return saturate(ao);
+}
+
 float4 FXAA(float2 uv)
 {
     float2 rcpFrame = g_invScreenSize;
@@ -203,8 +214,9 @@ float4 PSMain(PSIn i) : SV_TARGET
     // SSAO
     if (g_enableSsao > 0.5f)
     {
-        float ao = g_ssaoTex.SampleLevel(g_pointClamp, uv, 0).r;
-        float aoMul = lerp(1.0f, ao, g_ssaoIntensity);
+        float ao = SampleSsao(uv);
+        float aoAmount = saturate(g_ssaoIntensity) * smoothstep(0.02f, 0.25f, alpha);
+        float aoMul = lerp(1.0f, ao, aoAmount);
         color *= aoMul;
     }
 

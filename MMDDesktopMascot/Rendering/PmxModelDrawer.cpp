@@ -11,9 +11,11 @@
 #include <cstring>
 #include <cwctype>
 #include <filesystem>
+#include <initializer_list>
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 namespace
 {
@@ -24,12 +26,63 @@ namespace
 		return s;
 	}
 
-	static bool ContainsAnyW(const std::wstring& hay, std::initializer_list<const wchar_t*> needles)
+	bool IsAsciiAlpha(wchar_t c) noexcept
+	{
+		return (c >= L'a' && c <= L'z') || (c >= L'A' && c <= L'Z');
+	}
+
+	bool IsAsciiDigit(wchar_t c) noexcept
+	{
+		return c >= L'0' && c <= L'9';
+	}
+
+	bool ContainsAsciiLetter(std::wstring_view text) noexcept
+	{
+		for (wchar_t c : text)
+		{
+			if (IsAsciiAlpha(c))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	bool ContainsKeywordW(const std::wstring& hay, const wchar_t* needle)
 	{
 		const std::wstring low = ToLowerW(hay);
+		const std::wstring key = ToLowerW(needle ? std::wstring(needle) : std::wstring{});
+		if (key.empty())
+		{
+			return false;
+		}
+
+		if (!ContainsAsciiLetter(key))
+		{
+			return low.find(key) != std::wstring::npos;
+		}
+
+		size_t pos = low.find(key);
+		while (pos != std::wstring::npos)
+		{
+			const bool beforeOk = (pos == 0) || (!IsAsciiAlpha(low[pos - 1]) && !IsAsciiDigit(low[pos - 1]));
+			const size_t after = pos + key.size();
+			const bool afterOk = (after >= low.size()) || !IsAsciiAlpha(low[after]);
+			if (beforeOk && afterOk)
+			{
+				return true;
+			}
+			pos = low.find(key, pos + 1);
+		}
+
+		return false;
+	}
+
+	static bool ContainsAnyW(const std::wstring& hay, std::initializer_list<const wchar_t*> needles)
+	{
 		for (auto n : needles)
 		{
-			if (low.find(n) != std::wstring::npos) return true;
+			if (ContainsKeywordW(hay, n)) return true;
 		}
 		return false;
 	}
@@ -79,20 +132,6 @@ namespace
 		return 0;
 	}
 
-	bool LooksLikeFaceMaterial(const PmxModel::Material& m)
-	{
-		const std::wstring all = m.name + L" " + m.nameEn + L" " + m.memo;
-		const std::wstring low = ToLowerW(all);
-
-		if (low.find(L"face") != std::wstring::npos) return true;
-		if (low.find(L"facial") != std::wstring::npos) return true;
-
-		if (all.find(L"顔") != std::wstring::npos) return true;
-		if (all.find(L"かお") != std::wstring::npos) return true;
-		if (all.find(L"頭部") != std::wstring::npos) return true;
-
-		return false;
-	}
 
 	void GetMaterialStyleParams(
 		uint32_t type,
@@ -529,6 +568,7 @@ namespace
 		material.toonParams1.w = std::max(0.0f, material.toonParams1.w);
 		material.toonParams2.x = std::max(0.0f, material.toonParams2.x);
 		saturateColor(material.toonParams2.y);
+		saturateColor(material._pad3);
 	}
 }
 
@@ -864,12 +904,6 @@ void PmxModelDrawer::EnsurePmxResources(const PmxModel* model, const LightSettin
 		}
 		m_resources->CopySrv(gm.srvBlockIndex + 4, hairSpecMaskSrv);
 
-		const bool isFace = lightSettings.faceMaterialOverridesEnabled && LooksLikeFaceMaterial(mat);
-		if (isFace)
-		{
-			shadowMul = lightSettings.faceShadowMul;
-			toonContrastMul = lightSettings.faceToonContrastMul;
-		}
 
 		gm.materialCbGpu = m_materialCb->GetGPUVirtualAddress() + mi * m_materialCbStride;
 		gm.localCenter = ComputeMaterialCenter(gm.mat, verts, inds);
@@ -900,6 +934,7 @@ void PmxModelDrawer::EnsurePmxResources(const PmxModel* model, const LightSettin
 			: 0.0f;
 		const bool edgeEnabled = gm.edgeEnabledOverridesPmxFlag ? gm.edgeEnabled : (gm.edgeEnabled && mat.ShouldDrawEdge());
 		mcb->edgeEnabled = edgeEnabled ? 1.0f : 0.0f;
+		mcb->_pad3 = 0.0f;
 		mcb->shadowColorOverride = gm.shadowColorOverride;
 		mcb->toonParams0 = gm.toonParams0;
 		mcb->toonParams1 = gm.toonParams1;
@@ -948,12 +983,6 @@ void PmxModelDrawer::UpdateMaterialSettings(const LightSettings& lightSettings)
 			specMul = gm.toonParams1.y;
 		}
 
-		if (lightSettings.faceMaterialOverridesEnabled && LooksLikeFaceMaterial(gm.mat))
-		{
-			shadowMul = lightSettings.faceShadowMul;
-			toonContrastMul = lightSettings.faceToonContrastMul;
-		}
-
 		MaterialCB* mcb = reinterpret_cast<MaterialCB*>(m_materialCbMapped + mi * m_materialCbStride);
 		mcb->shadowMul = shadowMul;
 		mcb->toonContrastMul = toonContrastMul;
@@ -961,6 +990,7 @@ void PmxModelDrawer::UpdateMaterialSettings(const LightSettings& lightSettings)
 		mcb->rimMul = rimMul;
 		mcb->specMul = specMul;
 		mcb->materialType = matType;
+		mcb->_pad3 = 0.0f;
 		mcb->shadowColorOverride = gm.shadowColorOverride;
 		mcb->toonParams0 = gm.toonParams0;
 		mcb->toonParams1 = gm.toonParams1;
@@ -1467,6 +1497,7 @@ void PmxModelDrawer::ResetMaterialConstants(size_t materialIndex)
 		? material.edgeEnabled
 		: (material.edgeEnabled && material.mat.ShouldDrawEdge());
 	cb->edgeEnabled = edgeEnabled ? 1.0f : 0.0f;
+	cb->_pad3 = 0.0f;
 	cb->shadowColorOverride = material.shadowColorOverride;
 	cb->toonParams0 = material.toonParams0;
 	cb->toonParams1 = material.toonParams1;

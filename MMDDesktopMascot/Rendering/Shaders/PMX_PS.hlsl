@@ -458,6 +458,8 @@ PSOut PSMain(PSIn i)
     float3 shadowColor = MakeShadowColor(baseColor, materialType);
 
     float3 L = normalize(g_lightDir0);
+    float3 fillDir = (dot(g_lightDir1, g_lightDir1) > 1.0e-5f) ? g_lightDir1 : float3(-0.5f, 0.5f, -0.25f);
+    float3 Lfill = normalize(fillDir);
     float selfShadow = StylizeSelfShadow(SampleSelfShadow(i.worldPos, N, L), i.pos.xy);
 
     float ndotl01 = ComputeNdotL01(N, L);
@@ -474,26 +476,39 @@ PSOut PSMain(PSIn i)
     float3 diffuse = lerp(shadowColor, baseColor, toonLit);
     diffuse = ApplySaturation(diffuse, lerp(1.0, MaterialSaturationBoost(materialType), 0.35));
 
+    float fillNdotL01 = ComputeNdotL01(N, Lfill);
+    fillNdotL01 = ApplySkinLightRelaxation(fillNdotL01, materialType);
+    float fillLit =
+        (g_enableToon != 0)
+        ? smoothstep(0.12f, 0.88f, fillNdotL01 + 0.08f)
+        : fillNdotL01;
+    float fillShadowRelief = lerp(0.55f, 1.0f, selfShadow);
+    float fillIntensity = max(g_lightInt1, 0.0f) * fillLit * fillShadowRelief;
+    float3 fillDiffuse = lerp(shadowColor, baseColor, saturate(fillLit * 0.75f + 0.20f));
+
     float upFactor = 0.5 + 0.5 * saturate(N.y);
     float ambientInfluence = lerp(1.0, upFactor, saturate(g_ambientNormalInfluence));
     float3 ambient = shadowColor * g_ambientMat * (g_ambient + 0.05) * ambientInfluence;
 
     float keyIntensity = g_lightInt0 * lerp(1.0 - g_shadowStrength, 1.0, selfShadow);
-    float3 color = diffuse * g_lightColor0 * keyIntensity + ambient;
+    float3 color = diffuse * g_lightColor0 * keyIntensity + fillDiffuse * g_lightColor1 * fillIntensity + ambient;
 
-    float specPower = lerp(8.0, 128.0, saturate(g_specPowerMat * 0.2));
+    float specPower = lerp(8.0, 128.0, saturate(g_specPowerMat * 5.0));
     specPower *= max(g_specPower, 1.0) / 48.0;
     float specMask = ComputeToonSpecular(N_base, V, L, max(specPower, 1.0));
     float specMul = (g_toonParams1.y >= 0.0) ? g_toonParams1.y : g_specMul;
     specMask *= saturate(specMul) * saturate(toonLit + 0.35);
-    float3 spec = g_specularMat * g_specColor * g_specStrength * specMask * g_lightColor0;
+    float fillSpecMask = ComputeToonSpecular(N_base, V, Lfill, max(specPower, 1.0));
+    fillSpecMask *= saturate(specMul) * saturate(fillLit + 0.25f) * fillShadowRelief * 0.35f * max(g_lightInt1, 0.0f);
+    float3 spec = g_specularMat * g_specColor * g_specStrength * (specMask * g_lightColor0 + fillSpecMask * g_lightColor1);
     color += spec;
 
     if (materialType == MATERIAL_HAIR)
     {
         float hairSpecMask = g_hairSpecMask.Sample(g_samp, i.uv).r;
         float hairSpec = ComputeHairSpecular(N_base, V, L) * hairSpecMask * saturate(toonLit + 0.25);
-        color += hairSpec * max(g_specularMat, float3(0.15, 0.15, 0.15)) * g_lightColor0;
+        float fillHairSpec = ComputeHairSpecular(N_base, V, Lfill) * hairSpecMask * saturate(fillLit + 0.20f) * fillShadowRelief * 0.35f * max(g_lightInt1, 0.0f);
+        color += max(g_specularMat, float3(0.15, 0.15, 0.15)) * (hairSpec * g_lightColor0 + fillHairSpec * g_lightColor1);
     }
 
     float3x3 V3 = (float3x3)g_view;
@@ -545,7 +560,7 @@ PSOut PSMain(PSIn i)
     float outlinePixels = g_outlineBaseWidth * g_edgeSize * i.edgeScale * outlineScale * g_outlineWidthScale;
     float outlineWidthNorm = saturate(outlinePixels / 8.0);
 
-    o.auxNormal = float4(normalize(N) * 0.5 + 0.5, (float)materialType / 255.0);
+    o.auxNormal = float4(normalize(N) * 0.5 + 0.5, float(materialType) / 255.0);
     o.auxToon = float4(ndotl01, specMask, saturate(rimMask), 1.0 - toonLit);
     o.auxOutline = float4(outlineWidthNorm, saturate(g_materialIdNormalized), edgeEnabled, saturate(i.pos.z));
     o.auxEdgeColor = saturate(g_edgeColor);

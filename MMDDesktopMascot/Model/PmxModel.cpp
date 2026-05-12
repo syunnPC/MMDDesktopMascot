@@ -485,7 +485,8 @@ void PmxModel::LoadMorphs(BinaryReader& br)
 		morph.panel = br.Read<std::uint8_t>();
 		morph.type = static_cast<Morph::Type>(br.Read<std::uint8_t>());
 
-		if (static_cast<int>(morph.type) < 0 || static_cast<int>(morph.type) > 9)
+		if (static_cast<int>(morph.type) < 0 ||
+			static_cast<int>(morph.type) > static_cast<int>(Morph::Type::Impulse))
 		{
 			throw std::runtime_error("Unknown morph type.");
 		}
@@ -519,7 +520,7 @@ void PmxModel::LoadMorphs(BinaryReader& br)
 					Morph::GroupOffset offset{};
 					offset.morphIndex = ReadIndexSigned(br, m_header.morphIndexSize);
 					offset.weight = br.Read<float>();
-					if (offset.morphIndex >= 0 && static_cast<size_t>(offset.morphIndex) < m_morphs.size())
+					if (offset.morphIndex >= 0 && offset.morphIndex < morphCount)
 					{
 						morph.groupOffsets.push_back(offset);
 					}
@@ -581,7 +582,8 @@ void PmxModel::LoadMorphs(BinaryReader& br)
 					offset.textureFactor = ReadFloat4(br);
 					offset.sphereTextureFactor = ReadFloat4(br);
 					offset.toonTextureFactor = ReadFloat4(br);
-					if (offset.materialIndex >= 0 && static_cast<size_t>(offset.materialIndex) < m_materials.size())
+					if (offset.materialIndex == -1 ||
+						(offset.materialIndex >= 0 && static_cast<size_t>(offset.materialIndex) < m_materials.size()))
 					{
 						morph.materialOffsets.push_back(offset);
 					}
@@ -592,7 +594,7 @@ void PmxModel::LoadMorphs(BinaryReader& br)
 					Morph::FlipOffset offset{};
 					offset.morphIndex = ReadIndexSigned(br, m_header.morphIndexSize);
 					offset.weight = br.Read<float>();
-					if (offset.morphIndex >= 0 && static_cast<size_t>(offset.morphIndex) < m_morphs.size())
+					if (offset.morphIndex >= 0 && offset.morphIndex < morphCount)
 					{
 						morph.flipOffsets.push_back(offset);
 					}
@@ -605,7 +607,8 @@ void PmxModel::LoadMorphs(BinaryReader& br)
 					offset.localFlag = br.Read<std::uint8_t>();
 					offset.velocity = ReadFloat3(br);
 					offset.torque = ReadFloat3(br);
-					if (offset.rigidBodyIndex >= 0 && static_cast<size_t>(offset.rigidBodyIndex) < m_rigidBodies.size())
+					// Rigid bodies are loaded after morphs in PMX order.
+					if (offset.rigidBodyIndex >= 0)
 					{
 						morph.impulseOffsets.push_back(offset);
 					}

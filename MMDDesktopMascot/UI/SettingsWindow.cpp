@@ -42,6 +42,10 @@ namespace
 	constexpr int ID_FPS_LIMIT_TO_REFRESH = 1043;
 	constexpr int ID_FPS_VSYNC = 1044;
 	constexpr int ID_PRESET_MODE_COMBO = 1045;
+	constexpr int ID_RENDER_RES_MODE_COMBO = 1046;
+	constexpr int ID_RENDER_SCALE_EDIT = 1047;
+	constexpr int ID_RENDER_CUSTOM_WIDTH_EDIT = 1048;
+	constexpr int ID_RENDER_CUSTOM_HEIGHT_EDIT = 1049;
 
 	constexpr int ID_SCALE_SLIDER = 105;
 	constexpr int ID_BRIGHTNESS_SLIDER = 110;
@@ -79,14 +83,18 @@ namespace
 	constexpr int ID_OUTLINE_STRENGTH_SLIDER = 159;
 	constexpr int ID_OUTLINE_OPACITY_SLIDER = 160;
 	constexpr int ID_TOON_DEBUG_VIEW_COMBO = 161;
+	constexpr int ID_OUTLINE_SILHOUETTE_MODE_ENABLE = 162;
+	constexpr int ID_OUTLINE_SILHOUETTE_ANGLE_SLIDER = 163;
+	constexpr int ID_OUTLINE_NON_SILHOUETTE_ENABLE = 164;
+	constexpr int ID_OUTLINE_NON_SILHOUETTE_WIDTH_SLIDER = 165;
+	constexpr int ID_OUTLINE_NON_SILHOUETTE_OPACITY_SLIDER = 166;
+	constexpr int ID_OUTLINE_NON_SILHOUETTE_ANGLE_SLIDER = 167;
+	constexpr int ID_SSAO_ENABLE = 172;
+	constexpr int ID_SSAO_INTENSITY_SLIDER = 173;
 
 	constexpr int ID_SHADOW_DEEP_THRESH_SLIDER = 148;
 	constexpr int ID_SHADOW_DEEP_SOFT_SLIDER = 149;
 	constexpr int ID_SHADOW_DEEP_MUL_SLIDER = 150;
-	constexpr int ID_FACE_SHADOW_MUL_SLIDER = 151;
-	constexpr int ID_FACE_CONTRAST_MUL_SLIDER = 152;
-	constexpr int ID_FACE_OVERRIDE_ENABLE = 153;
-
 	constexpr int ID_PHYS_FIXED_TIMESTEP = 300;
 	constexpr int ID_PHYS_MAX_SUBSTEPS = 301;
 	constexpr int ID_PHYS_WARMUP_STEPS = 349;
@@ -105,6 +113,7 @@ namespace
 	constexpr int ID_PHYS_GLOBAL_DAMPING_SCALE = 315;
 	constexpr int ID_PHYS_VELOCITY_SETTLE_THRESHOLD = 316;
 	constexpr int ID_PHYS_MIN_ANGULAR_DAMPING = 317;
+	constexpr int ID_PHYS_ADVANCED_TOGGLE = 350;
 
 	constexpr int ID_OK = 200;
 	constexpr int ID_CANCEL = 201;
@@ -888,27 +897,44 @@ void SettingsWindow::CreateControls()
 	const int sliderW = std::max(200, usableW - labelW - valueW - 14);
 	const int sectionW = std::max(0, usableW);
 
+	int currentSection = 0;
+	bool regAdvanced = false;
+	auto Reg = [&](HWND h) -> HWND {
+		if (h) {
+			if (regAdvanced)
+				m_physicsAdvancedControls.push_back(h);
+			else
+				m_tabControls[currentSection].push_back(h);
+		}
+		return h;
+		};
+
+	auto RegAdv = [&](HWND h) -> HWND {
+		if (h) { m_physicsAdvancedControls.push_back(h); }
+		return h;
+		};
+
 	auto CreateLabel = [&](const wchar_t* text, int x, int y, int w) {
 		HWND h = CreateWindowExW(0, L"STATIC", text, WS_CHILD | WS_VISIBLE | SS_CENTERIMAGE, x, y, w, 24, parent, nullptr, m_hInst, nullptr);
-		SetModernFont(h);
+		SetModernFont(h); Reg(h);
 		return h;
 		};
 
 	auto CreateSectionHeader = [&](const wchar_t* text, int x, int y, int w) {
 		HWND h = CreateWindowExW(0, L"STATIC", text, WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, x, y, w, 24, parent, nullptr, m_hInst, nullptr);
-		SetHeaderFont(h);
+		SetHeaderFont(h); Reg(h);
 		return h;
 		};
 
 	auto CreateDivider = [&](int x, int y, int w) {
 		HWND h = CreateWindowExW(0, L"STATIC", nullptr, WS_CHILD | WS_VISIBLE | SS_ETCHEDHORZ, x, y, w, 1, parent, nullptr, m_hInst, nullptr);
+		Reg(h);
 		return h;
 		};
 
 	auto CreateSlider = [&](int id, int x, int y, int w) {
 		HWND h = CreateWindowExW(0, TRACKBAR_CLASSW, L"", WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_NOTICKS, x, y, w, 24, parent, ControlIdToMenuHandle(id), m_hInst, nullptr);
-		SetModernFont(h);
-		SetDarkTheme(h);
+		SetModernFont(h); SetDarkTheme(h); Reg(h);
 		return h;
 		};
 
@@ -916,19 +942,23 @@ void SettingsWindow::CreateControls()
 		DWORD style = WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL;
 		if (numeric) style |= ES_NUMBER;
 		HWND h = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", style, x, y, w, 24, parent, ControlIdToMenuHandle(id), m_hInst, nullptr);
-		SetModernFont(h);
-		SetDarkTheme(h);
+		SetModernFont(h); SetDarkTheme(h); Reg(h);
 		return h;
 		};
 
 	auto CreateCheck = [&](int id, const wchar_t* text, int x, int y, int w) {
 		HWND h = CreateWindowExW(0, L"BUTTON", text, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, x, y, w, 24, parent, ControlIdToMenuHandle(id), m_hInst, nullptr);
-		SetModernFont(h);
-		SetDarkTheme(h);
+		SetModernFont(h); SetDarkTheme(h); Reg(h);
 		return h;
 		};
 
-	m_tooltip = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, nullptr, WS_POPUP | TTS_ALWAYSTIP | TTS_BALLOON,
+	auto CreateSubSectionHeader = [&](const wchar_t* text, int x, int yy, int w) {
+		HWND h = CreateWindowExW(0, L"STATIC", text, WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, x + 4, yy, w - 4, 20, parent, nullptr, m_hInst, nullptr);
+		SetModernFont(h); Reg(h);
+		return h;
+		};
+
+		m_tooltip = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, nullptr, WS_POPUP | TTS_ALWAYSTIP | TTS_BALLOON,
 								CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
 								m_hwnd, nullptr, m_hInst, nullptr);
 	SendMessageW(m_tooltip, TTM_SETMAXTIPWIDTH, 0, 340);
@@ -946,20 +976,23 @@ void SettingsWindow::CreateControls()
 		SendMessageW(m_tooltip, TTM_ADDTOOL, 0, reinterpret_cast<LPARAM>(&tti));
 		};
 
-
-	m_sectionYBasic = y;
-	CreateSectionHeader(L"基本設定", xPadding, y, sectionW);
-	CreateDivider(xPadding, y + 24, sectionW);
+// ===== Section 0: 基本 =====
+	currentSection = 0;
+	y = 14;
+	Reg(CreateSectionHeader(L"基本設定", xPadding, y, sectionW));
+	Reg(CreateDivider(xPadding, y + 24, sectionW));
 	y += 30;
 
 
 	CreateLabel(L"モデルパス:", xPadding, y, labelW);
 	m_modelPathEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
 									  xPadding + labelW + 6, y, editW, 24, parent, ControlIdToMenuHandle(ID_MODEL_PATH), m_hInst, nullptr);
+	Reg(m_modelPathEdit);
 	SetModernFont(m_modelPathEdit);
 	SetDarkTheme(m_modelPathEdit);
 	m_browseBtn = CreateWindowExW(0, L"BUTTON", L"参照...", WS_CHILD | WS_VISIBLE,
 								  xPadding + labelW + 6 + editW + 8, y, browseBtnW, 24, parent, ControlIdToMenuHandle(ID_BROWSE), m_hInst, nullptr);
+	Reg(m_browseBtn);
 	SetModernFont(m_browseBtn);
 	SetDarkTheme(m_browseBtn);
 	y += rowH + 8;
@@ -970,11 +1003,13 @@ void SettingsWindow::CreateControls()
 	CreateLabel(L"最大FPS:", xPadding, y, labelW);
 	m_fpsEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_NUMBER,
 								xPadding + labelW + 6, y, 76, 24, parent, ControlIdToMenuHandle(ID_FPS_EDIT), m_hInst, nullptr);
+	Reg(m_fpsEdit);
 	SetModernFont(m_fpsEdit);
 	SetDarkTheme(m_fpsEdit);
 	m_fpsSpin = CreateWindowExW(0, UPDOWN_CLASSW, nullptr,
 								WS_CHILD | WS_VISIBLE | UDS_ARROWKEYS | UDS_SETBUDDYINT | UDS_ALIGNRIGHT,
 								xPadding + labelW + 6 + 76, y, 20, 24, parent, ControlIdToMenuHandle(ID_FPS_SPIN), m_hInst, nullptr);
+	Reg(m_fpsSpin);
 	SendMessageW(m_fpsSpin, UDM_SETRANGE32, 1, 240);
 	SendMessageW(m_fpsSpin, UDM_SETBUDDY, reinterpret_cast<WPARAM>(m_fpsEdit), 0);
 	m_unlimitedFpsCheck = CreateCheck(ID_FPS_UNLIMITED, L"無制限", xPadding + labelW + 6 + 104, y, 120);
@@ -991,20 +1026,48 @@ void SettingsWindow::CreateControls()
 	AddTooltip(m_vsyncCheck, L"有効にすると垂直同期でティアリングを抑えます。");
 	y += rowH;
 
+	CreateLabel(L"レンダー解像度:", xPadding, y, labelW);
+	m_renderResolutionModeCombo = CreateWindowExW(
+		0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
+		xPadding + labelW + 6, y, 280, 200, parent, ControlIdToMenuHandle(ID_RENDER_RES_MODE_COMBO), m_hInst, nullptr);
+	Reg(m_renderResolutionModeCombo);
+	SetModernFont(m_renderResolutionModeCombo);
+	SetDarkTheme(m_renderResolutionModeCombo);
+	SendMessageW(m_renderResolutionModeCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"クライアントサイズ (100%)"));
+	SendMessageW(m_renderResolutionModeCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"クライアントサイズ比 (%)"));
+	SendMessageW(m_renderResolutionModeCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"カスタム解像度 (px)"));
+	y += rowH;
+
+	CreateLabel(L"解像度倍率(%):", xPadding, y, labelW);
+	m_renderScaleEdit = CreateEdit(ID_RENDER_SCALE_EDIT, xPadding + labelW + 6, y, 90, true);
+	AddTooltip(m_renderScaleEdit, L"クライアントサイズ比モードで使う倍率です。100で等倍、200で2倍です。");
+	y += rowH;
+
+	CreateLabel(L"カスタム解像度:", xPadding, y, labelW);
+	m_renderCustomWidthEdit = CreateEdit(ID_RENDER_CUSTOM_WIDTH_EDIT, xPadding + labelW + 6, y, 90, true);
+	Reg(CreateLabel(L"x", xPadding + labelW + 102, y, 16));
+	m_renderCustomHeightEdit = CreateEdit(ID_RENDER_CUSTOM_HEIGHT_EDIT, xPadding + labelW + 122, y, 90, true);
+	AddTooltip(m_renderCustomWidthEdit, L"内部レンダリング解像度の幅 (px) です。");
+	AddTooltip(m_renderCustomHeightEdit, L"内部レンダリング解像度の高さ (px) です。");
+	y += rowH;
+
 	CreateLabel(L"プリセット読み込み:", xPadding, y, labelW);
 	m_presetModeCombo = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
 										xPadding + labelW + 6, y, 240, 200, parent, ControlIdToMenuHandle(ID_PRESET_MODE_COMBO), m_hInst, nullptr);
+	Reg(m_presetModeCombo);
 	SetModernFont(m_presetModeCombo);
 	SetDarkTheme(m_presetModeCombo);
 	SendMessageW(m_presetModeCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"モデル読み込み時に確認"));
 	SendMessageW(m_presetModeCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"常に読み込む"));
 	SendMessageW(m_presetModeCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"読み込まない"));
 	y += rowH + 20;
+	m_tabContentHeight[0] = y;
 
-
-	m_sectionYLight = y;
-	CreateSectionHeader(L"表示・ライト", xPadding, y, sectionW);
-	CreateDivider(xPadding, y + 24, sectionW);
+	// ===== Section 1: ライト =====
+	currentSection = 1;
+	y = 14;
+	Reg(CreateSectionHeader(L"表示・ライト", xPadding, y, sectionW));
+	Reg(CreateDivider(xPadding, y + 24, sectionW));
 	y += 30;
 	CreateLabel(L"モデルサイズ:", xPadding, y, labelW);
 	m_scaleSlider = CreateSlider(ID_SCALE_SLIDER, xPadding + labelW, y, sliderW);
@@ -1035,8 +1098,10 @@ void SettingsWindow::CreateControls()
 	SendMessageW(m_keyIntensitySlider, TBM_SETRANGE, TRUE, MAKELONG(0, 300));
 	m_keyIntensityLabel = CreateLabel(L"1.40", xPadding + labelW + (sliderW - 80) + 5, y, 40);
 	m_keyColorBtn = CreateWindowExW(0, L"BUTTON", L"色", WS_CHILD | WS_VISIBLE, xPadding + labelW + (sliderW - 80) + 50, y, 40, 24, parent, ControlIdToMenuHandle(ID_KEY_COLOR_BTN), m_hInst, nullptr);
+	Reg(m_keyColorBtn);
 	SetModernFont(m_keyColorBtn); SetDarkTheme(m_keyColorBtn);
 	m_keyColorPreview = CreateWindowExW(WS_EX_STATICEDGE, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_OWNERDRAW, xPadding + labelW + (sliderW - 80) + 95, y + 2, 20, 20, parent, nullptr, m_hInst, nullptr);
+	Reg(m_keyColorPreview);
 	y += rowH;
 
 	CreateLabel(L"補助光源強度/色:", xPadding, y, labelW);
@@ -1044,56 +1109,140 @@ void SettingsWindow::CreateControls()
 	SendMessageW(m_fillIntensitySlider, TBM_SETRANGE, TRUE, MAKELONG(0, 200));
 	m_fillIntensityLabel = CreateLabel(L"0.50", xPadding + labelW + (sliderW - 80) + 5, y, 40);
 	m_fillColorBtn = CreateWindowExW(0, L"BUTTON", L"色", WS_CHILD | WS_VISIBLE, xPadding + labelW + (sliderW - 80) + 50, y, 40, 24, parent, ControlIdToMenuHandle(ID_FILL_COLOR_BTN), m_hInst, nullptr);
+	Reg(m_fillColorBtn);
 	SetModernFont(m_fillColorBtn); SetDarkTheme(m_fillColorBtn);
 	m_fillColorPreview = CreateWindowExW(WS_EX_STATICEDGE, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_OWNERDRAW, xPadding + labelW + (sliderW - 80) + 95, y + 2, 20, 20, parent, nullptr, m_hInst, nullptr);
+	Reg(m_fillColorPreview);
 	y += rowH + 20;
 
+	Reg(CreateSubSectionHeader(L"── 光源方向 ──", xPadding, y, sectionW));
+	y += 24;
+	Reg(CreateLabel(L"主光源方向 (X/Y/Z):", xPadding, y, 200)); y += 24;
+	int slider3W = 145;
+	m_keyDirXSlider = CreateSlider(ID_KEY_DIR_X_SLIDER, xPadding, y, slider3W);
+	SendMessageW(m_keyDirXSlider, TBM_SETRANGE, TRUE, MAKELONG(0, 200));
+	m_keyDirYSlider = CreateSlider(ID_KEY_DIR_Y_SLIDER, xPadding + 150, y, slider3W);
+	SendMessageW(m_keyDirYSlider, TBM_SETRANGE, TRUE, MAKELONG(0, 200));
+	m_keyDirZSlider = CreateSlider(ID_KEY_DIR_Z_SLIDER, xPadding + 300, y, slider3W);
+	SendMessageW(m_keyDirZSlider, TBM_SETRANGE, TRUE, MAKELONG(0, 200));
+	y += rowH + 5;
+	Reg(CreateLabel(L"補助光源方向 (X/Y/Z):", xPadding, y, 200)); y += 24;
+	m_fillDirXSlider = CreateSlider(ID_FILL_DIR_X_SLIDER, xPadding, y, slider3W);
+	SendMessageW(m_fillDirXSlider, TBM_SETRANGE, TRUE, MAKELONG(0, 200));
+	m_fillDirYSlider = CreateSlider(ID_FILL_DIR_Y_SLIDER, xPadding + 150, y, slider3W);
+	SendMessageW(m_fillDirYSlider, TBM_SETRANGE, TRUE, MAKELONG(0, 200));
+	m_fillDirZSlider = CreateSlider(ID_FILL_DIR_Z_SLIDER, xPadding + 300, y, slider3W);
+	SendMessageW(m_fillDirZSlider, TBM_SETRANGE, TRUE, MAKELONG(0, 200));
+	y += rowH + 20;
+	m_tabContentHeight[1] = y;
 
-	m_sectionYToon = y;
-	CreateSectionHeader(L"トゥーンシェーディング", xPadding, y, sectionW);
-	CreateDivider(xPadding, y + 24, sectionW);
+	// ===== Section 2: トゥーン =====
+	currentSection = 2;
+	y = 14;
+	Reg(CreateSectionHeader(L"トゥーンシェーディング", xPadding, y, sectionW));
+	Reg(CreateDivider(xPadding, y + 24, sectionW));
 	y += 30;
+	Reg(CreateSubSectionHeader(L"── 基本 ──", xPadding, y, sectionW));
+	y += 24;
 	m_toonEnableCheck = CreateWindowExW(0, L"BUTTON", L"トゥーンシェーディング有効", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, xPadding, y, 220, 24, parent, ControlIdToMenuHandle(ID_TOON_ENABLE), m_hInst, nullptr);
+	Reg(m_toonEnableCheck);
 	SetModernFont(m_toonEnableCheck); SetDarkTheme(m_toonEnableCheck);
+	Reg(m_toonEnableCheck);
 	y += rowH;
 
+	y += 8;
+	Reg(CreateSubSectionHeader(L"── 影 ──", xPadding, y, sectionW));
+	y += 24;
 	m_selfShadowCheck = CreateCheck(ID_SELF_SHADOW_ENABLE, L"自己影を有効", xPadding, y, 180);
+	Reg(m_selfShadowCheck);
 	AddTooltip(m_selfShadowCheck, L"主光源方向の自己影を使います。前髪や衣装の落ち影が強く出ます。");
 	y += rowH;
 
-	m_outlineCheck = CreateCheck(ID_OUTLINE_ENABLE, L"輪郭線を有効", xPadding, y, 180);
-	AddTooltip(m_outlineCheck, L"PMX のエッジ描画を有効にします。重い場合はここを切ると効果が出やすいです。");
+	m_ssaoCheck = CreateCheck(ID_SSAO_ENABLE, L"SSAO を有効", xPadding, y, 180);
+	AddTooltip(m_ssaoCheck, L"画面上の深度から接地部や凹部に薄い環境遮蔽を加えます。");
+	y += rowH;
+
+	CreateLabel(L"SSAO 強度:", xPadding, y, labelW);
+	m_ssaoIntensitySlider = CreateSlider(ID_SSAO_INTENSITY_SLIDER, xPadding + labelW, y, sliderW);
+	SendMessageW(m_ssaoIntensitySlider, TBM_SETRANGE, TRUE, MAKELONG(0, 100));
+	m_ssaoIntensityLabel = CreateLabel(L"0.65", xPadding + labelW + sliderW + 10, y, 50);
+	y += rowH;
+
+	y += 8;
+	Reg(CreateSubSectionHeader(L"── アウトライン ──", xPadding, y, sectionW));
+	y += 24;
+	m_outlineCheck = CreateCheck(ID_OUTLINE_ENABLE, L"全アウトラインを描画", xPadding, y, 220);
+	Reg(m_outlineCheck);
+	AddTooltip(m_outlineCheck, L"PMX のエッジ描画を含む全アウトラインを有効にします。重い場合はここを切ると効果が出やすいです。");
 	y += rowH;
 
 	CreateLabel(L"輪郭線の強さ:", xPadding, y, labelW);
 	m_outlineStrengthSlider = CreateSlider(ID_OUTLINE_STRENGTH_SLIDER, xPadding + labelW, y, sliderW);
 	SendMessageW(m_outlineStrengthSlider, TBM_SETRANGE, TRUE, MAKELONG(0, 300));
 	m_outlineStrengthLabel = CreateLabel(L"1.00", xPadding + labelW + sliderW + 10, y, 50);
-	AddTooltip(m_outlineStrengthSlider, L"PMX 輪郭線の太さ倍率です。100% が既定値です。");
+	AddTooltip(m_outlineStrengthSlider, L"全アウトラインの太さ倍率です。100% が既定値です。");
 	y += rowH;
 
 	CreateLabel(L"輪郭線の濃さ:", xPadding, y, labelW);
 	m_outlineOpacitySlider = CreateSlider(ID_OUTLINE_OPACITY_SLIDER, xPadding + labelW, y, sliderW);
 	SendMessageW(m_outlineOpacitySlider, TBM_SETRANGE, TRUE, MAKELONG(0, 300));
 	m_outlineOpacityLabel = CreateLabel(L"1.00", xPadding + labelW + sliderW + 10, y, 50);
-	AddTooltip(m_outlineOpacitySlider, L"PMX 輪郭線の不透明度倍率です。前向き面の薄い輪郭も強められます。");
+	AddTooltip(m_outlineOpacitySlider, L"全アウトラインの不透明度倍率です。");
+	y += rowH;
+
+	m_outlineSilhouetteModeCheck = CreateCheck(ID_OUTLINE_SILHOUETTE_MODE_ENABLE, L"シルエットモード", xPadding, y, 220);
+	AddTooltip(m_outlineSilhouetteModeCheck, L"全アウトラインではなく、外周シルエットを基準に深度・法線の輪郭を合成します。");
+	y += rowH;
+
+	CreateLabel(L"シルエット許容:", xPadding, y, labelW);
+	m_outlineSilhouetteAngleSlider = CreateSlider(ID_OUTLINE_SILHOUETTE_ANGLE_SLIDER, xPadding + labelW, y, sliderW);
+	SendMessageW(m_outlineSilhouetteAngleSlider, TBM_SETRANGE, TRUE, MAKELONG(0, 100));
+	m_outlineSilhouetteAngleLabel = CreateLabel(L"0.00", xPadding + labelW + sliderW + 10, y, 50);
+	AddTooltip(m_outlineSilhouetteAngleSlider, L"シルエットモードで、法線が視線に対してどれだけ横向きの面まで輪郭線を許容するかです。");
+	y += rowH;
+
+	m_nonSilhouetteOutlineCheck = CreateCheck(ID_OUTLINE_NON_SILHOUETTE_ENABLE, L"非シルエット線を有効", xPadding, y, 220);
+	AddTooltip(m_nonSilhouetteOutlineCheck, L"シルエットモードで、通常アウトライン候補のうちシルエットではない部分を描画します。");
+	y += rowH;
+
+	CreateLabel(L"非シルエット太さ:", xPadding, y, labelW);
+	m_nonSilhouetteOutlineWidthSlider = CreateSlider(ID_OUTLINE_NON_SILHOUETTE_WIDTH_SLIDER, xPadding + labelW, y, sliderW);
+	SendMessageW(m_nonSilhouetteOutlineWidthSlider, TBM_SETRANGE, TRUE, MAKELONG(0, 300));
+	m_nonSilhouetteOutlineWidthLabel = CreateLabel(L"1.00", xPadding + labelW + sliderW + 10, y, 50);
+	y += rowH;
+
+	CreateLabel(L"非シルエット濃さ:", xPadding, y, labelW);
+	m_nonSilhouetteOutlineOpacitySlider = CreateSlider(ID_OUTLINE_NON_SILHOUETTE_OPACITY_SLIDER, xPadding + labelW, y, sliderW);
+	SendMessageW(m_nonSilhouetteOutlineOpacitySlider, TBM_SETRANGE, TRUE, MAKELONG(0, 300));
+	m_nonSilhouetteOutlineOpacityLabel = CreateLabel(L"1.00", xPadding + labelW + sliderW + 10, y, 50);
+	y += rowH;
+
+	CreateLabel(L"非シルエット許容:", xPadding, y, labelW);
+	m_nonSilhouetteOutlineAngleSlider = CreateSlider(ID_OUTLINE_NON_SILHOUETTE_ANGLE_SLIDER, xPadding + labelW, y, sliderW);
+	SendMessageW(m_nonSilhouetteOutlineAngleSlider, TBM_SETRANGE, TRUE, MAKELONG(0, 100));
+	m_nonSilhouetteOutlineAngleLabel = CreateLabel(L"0.45", xPadding + labelW + sliderW + 10, y, 50);
+	AddTooltip(m_nonSilhouetteOutlineAngleSlider, L"通常アウトライン候補からシルエット分を除いた線を、どれだけ戻すかです。0 で非表示、1 で全て戻します。");
 	y += rowH;
 
 	CreateLabel(L"アンチエイリアス:", xPadding, y, labelW);
 	m_aaModeCombo = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
 									xPadding + labelW, y, 220, 200, parent, ControlIdToMenuHandle(ID_AA_MODE_COMBO), m_hInst, nullptr);
+	Reg(m_aaModeCombo);
 	SetModernFont(m_aaModeCombo);
 	SetDarkTheme(m_aaModeCombo);
 	SendMessageW(m_aaModeCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"オフ"));
 	SendMessageW(m_aaModeCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"FXAA"));
 	SendMessageW(m_aaModeCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"MSAA"));
 	SendMessageW(m_aaModeCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"MSAA + FXAA"));
-	AddTooltip(m_aaModeCombo, L"輪郭の滑らかさ。MSAA は cutout 境界にも効き、FXAA は最終画像を整えます。");
+	SendMessageW(m_aaModeCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"SMAA"));
+	SendMessageW(m_aaModeCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"MSAA + SMAA"));
+	AddTooltip(m_aaModeCombo, L"輪郭の滑らかさ。MSAA は cutout 境界にも効き、FXAA/SMAA は最終画像を整えます。");
 	y += rowH;
 
 	CreateLabel(L"MSAA サンプル数:", xPadding, y, labelW);
 	m_msaaSamplesCombo = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
 										 xPadding + labelW, y, 220, 200, parent, ControlIdToMenuHandle(ID_MSAA_SAMPLES_COMBO), m_hInst, nullptr);
+	Reg(m_msaaSamplesCombo);
 	SetModernFont(m_msaaSamplesCombo);
 	SetDarkTheme(m_msaaSamplesCombo);
 	{
@@ -1113,6 +1262,7 @@ void SettingsWindow::CreateControls()
 	CreateLabel(L"影解像度:", xPadding, y, labelW);
 	m_shadowResolutionCombo = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
 											  xPadding + labelW, y, 220, 200, parent, ControlIdToMenuHandle(ID_SHADOW_RESOLUTION_COMBO), m_hInst, nullptr);
+	Reg(m_shadowResolutionCombo);
 	SetModernFont(m_shadowResolutionCombo);
 	SetDarkTheme(m_shadowResolutionCombo);
 	{
@@ -1166,6 +1316,7 @@ void SettingsWindow::CreateControls()
 
 	CreateLabel(L"コントラスト:", xPadding, y, labelW);
 	m_toonContrastSlider = CreateSlider(ID_TOON_CONTRAST_SLIDER, xPadding + labelW, y, sliderW);
+	Reg(m_toonDebugViewCombo);
 	SendMessageW(m_toonContrastSlider, TBM_SETRANGE, TRUE, MAKELONG(50, 250));
 	m_toonContrastLabel = CreateLabel(L"", xPadding + labelW + sliderW + 10, y, 50);
 	y += rowH;
@@ -1207,7 +1358,10 @@ void SettingsWindow::CreateControls()
 	m_shadowDeepMulLabel = CreateLabel(L"", xPadding + labelW + sliderW + 10, y, 50);
 	y += rowH;
 
-	CreateLabel(L"リム幅/強度:", xPadding, y, labelW);
+	y += 8;
+	Reg(CreateSubSectionHeader(L"── エフェクト ──", xPadding, y, sectionW));
+	y += 24;
+	Reg(CreateLabel(L"リム幅/強度:", xPadding, y, labelW));
 	m_rimWidthSlider = CreateSlider(ID_RIM_WIDTH_SLIDER, xPadding + labelW, y, sliderW / 2 - 5);
 	SendMessageW(m_rimWidthSlider, TBM_SETRANGE, TRUE, MAKELONG(10, 100));
 	m_rimIntensitySlider = CreateSlider(ID_RIM_INTENSITY_SLIDER, xPadding + labelW + sliderW / 2 + 5, y, sliderW / 2 - 5);
@@ -1220,55 +1374,17 @@ void SettingsWindow::CreateControls()
 	SendMessageW(m_specularStepSlider, TBM_SETRANGE, TRUE, MAKELONG(0, 100));
 	m_specularStepLabel = CreateLabel(L"", xPadding + labelW + sliderW + 10, y, 50);
 	y += rowH + 20;
+	m_tabContentHeight[2] = y;
 
 
-	CreateSectionHeader(L"顔マテリアル", xPadding, y, sectionW);
-	CreateDivider(xPadding, y + 24, sectionW);
-	y += 30;
-	m_faceMaterialOverridesCheck = CreateCheck(ID_FACE_OVERRIDE_ENABLE, L"顔マテリアルの別処理を有効", xPadding, y, 260);
-	AddTooltip(m_faceMaterialOverridesCheck, L"顔と判定したマテリアルだけ影の濃さとトゥーンコントラストを別設定で処理します。");
-	y += rowH;
-	CreateLabel(L"顔の影の濃さ:", xPadding, y, labelW);
-	m_faceShadowMulSlider = CreateSlider(ID_FACE_SHADOW_MUL_SLIDER, xPadding + labelW, y, sliderW);
-	SendMessageW(m_faceShadowMulSlider, TBM_SETRANGE, TRUE, MAKELONG(0, 100));
-	m_faceShadowMulLabel = CreateLabel(L"", xPadding + labelW + sliderW + 10, y, 50);
-	y += rowH;
-
-	CreateLabel(L"顔のコントラスト:", xPadding, y, labelW);
-	m_faceContrastMulSlider = CreateSlider(ID_FACE_CONTRAST_MUL_SLIDER, xPadding + labelW, y, sliderW);
-	SendMessageW(m_faceContrastMulSlider, TBM_SETRANGE, TRUE, MAKELONG(0, 200));
-	m_faceContrastMulLabel = CreateLabel(L"", xPadding + labelW + sliderW + 10, y, 50);
-	y += rowH + 20;
-
-	CreateSectionHeader(L"光源方向", xPadding, y, sectionW);
-	CreateDivider(xPadding, y + 24, sectionW);
-	y += 30;
-	CreateLabel(L"主光源方向 (X/Y/Z):", xPadding, y, 200); y += 24;
-	int slider3W = 145;
-	m_keyDirXSlider = CreateSlider(ID_KEY_DIR_X_SLIDER, xPadding, y, slider3W);
-	SendMessageW(m_keyDirXSlider, TBM_SETRANGE, TRUE, MAKELONG(0, 200));
-	m_keyDirYSlider = CreateSlider(ID_KEY_DIR_Y_SLIDER, xPadding + 150, y, slider3W);
-	SendMessageW(m_keyDirYSlider, TBM_SETRANGE, TRUE, MAKELONG(0, 200));
-	m_keyDirZSlider = CreateSlider(ID_KEY_DIR_Z_SLIDER, xPadding + 300, y, slider3W);
-	SendMessageW(m_keyDirZSlider, TBM_SETRANGE, TRUE, MAKELONG(0, 200));
-	y += rowH + 5;
-
-	CreateLabel(L"補助光源方向 (X/Y/Z):", xPadding, y, 200); y += 24;
-	m_fillDirXSlider = CreateSlider(ID_FILL_DIR_X_SLIDER, xPadding, y, slider3W);
-	SendMessageW(m_fillDirXSlider, TBM_SETRANGE, TRUE, MAKELONG(0, 200));
-	m_fillDirYSlider = CreateSlider(ID_FILL_DIR_Y_SLIDER, xPadding + 150, y, slider3W);
-	SendMessageW(m_fillDirYSlider, TBM_SETRANGE, TRUE, MAKELONG(0, 200));
-	m_fillDirZSlider = CreateSlider(ID_FILL_DIR_Z_SLIDER, xPadding + 300, y, slider3W);
-	SendMessageW(m_fillDirZSlider, TBM_SETRANGE, TRUE, MAKELONG(0, 200));
-	y += rowH + 20;
-
-
+	// ===== Section 3: 物理 =====
+	currentSection = 3;
+	y = 14;
 	const int physicsLabelW = 230;
 	const int physicsEditW = 80;
 
-	m_sectionYPhysics = y;
-	CreateSectionHeader(L"物理演算", xPadding, y, sectionW);
-	CreateDivider(xPadding, y + 24, sectionW);
+	Reg(CreateSectionHeader(L"物理演算", xPadding, y, sectionW));
+	Reg(CreateDivider(xPadding, y + 24, sectionW));
 	y += 30;
 
 	auto label = CreateLabel(L"固定タイムステップ:", xPadding, y, physicsLabelW);
@@ -1299,8 +1415,19 @@ void SettingsWindow::CreateControls()
 	AddTooltip(m_physicsGravityZEdit, L"重力加速度。Yが下方向。標準: (0, -98, 0)。");
 	y += rowH + 20;
 
-	CreateSectionHeader(L"物理演算(高度な設定)", xPadding, y, sectionW);
-	CreateDivider(xPadding, y + 24, sectionW);
+	// 高度な設定トグル
+	m_physicsAdvancedToggle = CreateWindowExW(0, L"BUTTON", L"▶ 高度な設定を表示",
+		WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+		xPadding, y, 220, 28, parent, ControlIdToMenuHandle(ID_PHYS_ADVANCED_TOGGLE), m_hInst, nullptr);
+	SetModernFont(m_physicsAdvancedToggle);
+	SetDarkTheme(m_physicsAdvancedToggle);
+	Reg(m_physicsAdvancedToggle);
+	y += 36;
+	m_tabContentHeight[3] = y;
+
+	regAdvanced = true;
+	RegAdv(CreateSectionHeader(L"物理演算(高度な設定)", xPadding, y, sectionW));
+	RegAdv(CreateDivider(xPadding, y + 24, sectionW));
 	y += 30;
 
 	label = CreateLabel(L"位置変化閾値:", xPadding, y, physicsLabelW);
@@ -1355,6 +1482,7 @@ void SettingsWindow::CreateControls()
 	AddTooltip(label, L"衝突マスクの解釈。Autoは自動判定。モデルによって切り替えると当たり判定が改善する場合がある。");
 	m_physicsCollisionMaskCombo = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
 												   xPadding + physicsLabelW, y, 200, 200, parent, ControlIdToMenuHandle(ID_PHYS_COLLISION_MASK_COMBO), m_hInst, nullptr);
+	Reg(m_physicsCollisionMaskCombo);
 	SetModernFont(m_physicsCollisionMaskCombo);
 	SetDarkTheme(m_physicsCollisionMaskCombo);
 	SendMessageW(m_physicsCollisionMaskCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"自動判定"));
@@ -1381,70 +1509,122 @@ void SettingsWindow::CreateControls()
 	AddTooltip(m_physicsMinAngularDampingEdit, L"すべての動的剛体に適用される角速度減衰の下限値。低い減衰値を持つモデルでも振動を抑える。標準: 0.05。");
 	y += rowH + 20;
 
-	m_physicsAdvancedStartY = y;
-	m_physicsAdvancedEndY = y;
-	m_physicsAdvancedHeight = 0;
+	regAdvanced = false;
+	m_physicsAdvancedContentHeight = y;
 
-
-
-
+	// Action buttons (not registered to any section - always visible)
 	{
 		const int actionGap = 10;
 		const int actionH = 32;
-
-		int resetW = 170;
-		int loadW = 170;
+		int resetW = 170, loadW = 170;
 		int saveW = sectionW - resetW - loadW - actionGap * 2;
-
-
 		if (saveW < 200)
 		{
 			const int each = std::max(0, (sectionW - actionGap * 2) / 3);
-			resetW = each;
-			loadW = each;
+			resetW = each; loadW = each;
 			saveW = sectionW - resetW - loadW - actionGap * 2;
 		}
-
 		const int xReset = xPadding;
 		const int xLoad = xReset + resetW + actionGap;
 		const int xSave = xLoad + loadW + actionGap;
-		m_physicsActionsExpandedY = y;
 
 		m_resetLightBtn = CreateWindowExW(0, L"BUTTON", L"ライト設定をリセット", WS_CHILD | WS_VISIBLE,
-										  xReset, y, resetW, actionH, parent, ControlIdToMenuHandle(ID_RESET_LIGHT), m_hInst, nullptr);
-		SetModernFont(m_resetLightBtn);
-		SetDarkTheme(m_resetLightBtn);
+			xReset, y, resetW, actionH, parent, ControlIdToMenuHandle(ID_RESET_LIGHT), m_hInst, nullptr);
+		SetModernFont(m_resetLightBtn); SetDarkTheme(m_resetLightBtn);
 
 		m_loadPresetBtn = CreateWindowExW(0, L"BUTTON", L"プリセットを読み込む", WS_CHILD | WS_VISIBLE,
-										  xLoad, y, loadW, actionH, parent, ControlIdToMenuHandle(ID_LOAD_PRESET), m_hInst, nullptr);
-		SetModernFont(m_loadPresetBtn);
-		SetDarkTheme(m_loadPresetBtn);
+			xLoad, y, loadW, actionH, parent, ControlIdToMenuHandle(ID_LOAD_PRESET), m_hInst, nullptr);
+		SetModernFont(m_loadPresetBtn); SetDarkTheme(m_loadPresetBtn);
 
 		m_savePresetBtn = CreateWindowExW(0, L"BUTTON", L"このモデルの設定を保存", WS_CHILD | WS_VISIBLE,
-										  xSave, y, saveW, actionH, parent, ControlIdToMenuHandle(ID_SAVE_PRESET), m_hInst, nullptr);
-		SetModernFont(m_savePresetBtn);
-		SetDarkTheme(m_savePresetBtn);
-
-		y += actionH + 24;
+			xSave, y, saveW, actionH, parent, ControlIdToMenuHandle(ID_SAVE_PRESET), m_hInst, nullptr);
+		SetModernFont(m_savePresetBtn); SetDarkTheme(m_savePresetBtn);
 	}
 
-	m_physicsExpandedContentHeight = y + 18;
-	m_physicsCollapsedContentHeight = std::max(0, m_physicsExpandedContentHeight - m_physicsAdvancedHeight);
-	m_totalContentHeight = m_physicsExpandedContentHeight;
-	UpdateScrollInfo();
+	// Initialize: show first section, hide others
+	ShowSection(0);
 }
 
 void SettingsWindow::UpdatePhysicsAdvancedVisibility()
 {
-	if (!m_content)
+	if (!m_content) return;
+	if (m_activeTab == 3)
 	{
-		return;
+		int actionY = m_physicsAdvancedExpanded ? m_physicsAdvancedContentHeight : m_tabContentHeight[3];
+		RepositionActionButtons(actionY);
+		m_totalContentHeight = actionY + 32 + 24 + 18;
 	}
-
-	m_totalContentHeight = m_physicsExpandedContentHeight;
 	ScrollTo(m_scrollY);
 }
 
+void SettingsWindow::ShowSection(int tabIndex)
+{
+	if (tabIndex < 0 || tabIndex > 3) return;
+	for (int i = 0; i < 4; ++i)
+	{
+		for (HWND h : m_tabControls[i])
+			if (h) ShowWindow(h, SW_HIDE);
+	}
+	for (HWND h : m_physicsAdvancedControls)
+		if (h) ShowWindow(h, SW_HIDE);
+
+	for (HWND h : m_tabControls[tabIndex])
+		if (h) ShowWindow(h, SW_SHOW);
+
+	if (tabIndex == 3 && m_physicsAdvancedExpanded)
+	{
+		for (HWND h : m_physicsAdvancedControls)
+			if (h) ShowWindow(h, SW_SHOW);
+	}
+
+	m_activeTab = tabIndex;
+	int actionY = m_tabContentHeight[tabIndex];
+	if (tabIndex == 3 && m_physicsAdvancedExpanded)
+		actionY = m_physicsAdvancedContentHeight;
+	RepositionActionButtons(actionY);
+	m_totalContentHeight = actionY + 32 + 24 + 18;
+	ScrollTo(0);
+	SendMessageW(m_tabs, SEGMSG_SETSEL, static_cast<WPARAM>(tabIndex), 0);
+	InvalidateRect(m_content, nullptr, TRUE);
+}
+
+void SettingsWindow::RepositionActionButtons(int y)
+{
+	if (!m_content) return;
+	RECT rc{};
+	GetClientRect(m_content, &rc);
+	const int contentW = rc.right - rc.left;
+	const int xPadding = 20;
+	const int usableW = std::max(0, contentW - xPadding * 2);
+	const int actionGap = 10;
+	const int actionH = 32;
+	int resetW = 170, loadW = 170;
+	int saveW = usableW - resetW - loadW - actionGap * 2;
+	if (saveW < 200)
+	{
+		const int each = std::max(0, (usableW - actionGap * 2) / 3);
+		resetW = each; loadW = each;
+		saveW = usableW - resetW - loadW - actionGap * 2;
+	}
+	if (m_resetLightBtn) SetWindowPos(m_resetLightBtn, nullptr, xPadding, y, resetW, actionH, SWP_NOZORDER | SWP_NOACTIVATE);
+	if (m_loadPresetBtn) SetWindowPos(m_loadPresetBtn, nullptr, xPadding + resetW + actionGap, y, loadW, actionH, SWP_NOZORDER | SWP_NOACTIVATE);
+	if (m_savePresetBtn) SetWindowPos(m_savePresetBtn, nullptr, xPadding + resetW + actionGap + loadW + actionGap, y, saveW, actionH, SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+void SettingsWindow::TogglePhysicsAdvanced()
+{
+	m_physicsAdvancedExpanded = !m_physicsAdvancedExpanded;
+	if (m_physicsAdvancedToggle)
+		SetWindowTextW(m_physicsAdvancedToggle,
+			m_physicsAdvancedExpanded ? L"▼ 高度な設定を非表示" : L"▶ 高度な設定を表示");
+	for (HWND h : m_physicsAdvancedControls)
+		if (h) ShowWindow(h, m_physicsAdvancedExpanded ? SW_SHOW : SW_HIDE);
+	int actionY = m_physicsAdvancedExpanded ? m_physicsAdvancedContentHeight : m_tabContentHeight[3];
+	RepositionActionButtons(actionY);
+	m_totalContentHeight = actionY + 32 + 24 + 18;
+	UpdateScrollInfo();
+	InvalidateRect(m_content, nullptr, TRUE);
+}
 void SettingsWindow::UpdateScrollInfo()
 {
 	if (!m_content) return;
@@ -1534,27 +1714,7 @@ void SettingsWindow::ScrollTo(int targetY)
 
 void SettingsWindow::UpdateNavHighlightFromScroll()
 {
-	if (!m_tabs || !m_content) return;
-
-
-
-	RECT rc{};
-	GetClientRect(m_content, &rc);
-	const int page = (rc.bottom - rc.top);
-	const int focusOffset = std::min(120, std::max(24, page / 4));
-	const int focusY = m_scrollY + focusOffset;
-
-	int idx = 0;
-	if (focusY >= m_sectionYPhysics) idx = 3;
-	else if (focusY >= m_sectionYToon) idx = 2;
-	else if (focusY >= m_sectionYLight) idx = 1;
-	else idx = 0;
-
-	if (idx != m_lastAutoNavIndex)
-	{
-		m_lastAutoNavIndex = idx;
-		SendMessageW(m_tabs, SEGMSG_SETSEL, static_cast<WPARAM>(idx), 0);
-	}
+	// With page-based switching, tab highlight is set by ShowSection
 }
 
 void SettingsWindow::LoadGeneralSettings(const AppSettings& settings)
@@ -1566,7 +1726,16 @@ void SettingsWindow::LoadGeneralSettings(const AppSettings& settings)
 	SetCheckState(m_vsyncCheck, settings.vsyncEnabled);
 	SetEditInt(m_fpsEdit, settings.targetFps);
 	SendMessageW(m_fpsSpin, UDM_SETPOS32, 0, settings.targetFps);
+	SendMessageW(
+		m_renderResolutionModeCombo,
+		CB_SETCURSEL,
+		static_cast<WPARAM>(std::clamp(settings.renderResolutionMode, 0, 2)),
+		0);
+	SetEditInt(m_renderScaleEdit, settings.renderScalePercent);
+	SetEditInt(m_renderCustomWidthEdit, settings.renderCustomWidth);
+	SetEditInt(m_renderCustomHeightEdit, settings.renderCustomHeight);
 	UpdateFpsControlState();
+	UpdateRenderResolutionControlState();
 	SendMessageW(m_presetModeCombo, CB_SETCURSEL, static_cast<WPARAM>(settings.globalPresetMode), 0);
 }
 
@@ -1581,15 +1750,17 @@ void SettingsWindow::LoadLightSettings(const LightSettings& light)
 	} checkBindings[] = {
 		{ m_toonEnableCheck, light.toonEnabled },
 		{ m_selfShadowCheck, light.selfShadowEnabled },
+		{ m_ssaoCheck, light.ssaoEnabled },
 		{ m_outlineCheck, light.outlineEnabled },
-		{ m_faceMaterialOverridesCheck, light.faceMaterialOverridesEnabled },
+		{ m_outlineSilhouetteModeCheck, light.outlineSilhouetteModeEnabled },
+		{ m_nonSilhouetteOutlineCheck, light.outlineNonSilhouetteEnabled },
 	};
 	for (const auto& binding : checkBindings)
 	{
 		SetCheckState(binding.check, binding.checked);
 	}
 
-	SendMessageW(m_aaModeCombo, CB_SETCURSEL, static_cast<WPARAM>(std::clamp(light.antiAliasingMode, 0, 3)), 0);
+	SendMessageW(m_aaModeCombo, CB_SETCURSEL, static_cast<WPARAM>(std::clamp(light.antiAliasingMode, 0, 5)), 0);
 	SetComboSelectionByItemData(m_msaaSamplesCombo, light.msaaSampleCount);
 	SetComboSelectionByItemData(m_shadowResolutionCombo, light.shadowMapSize);
 	SendMessageW(m_toonDebugViewCombo, CB_SETCURSEL, static_cast<WPARAM>(std::clamp(light.toonDebugView, 0, 12)), 0);
@@ -1632,15 +1803,18 @@ void SettingsWindow::LoadLightScalarControls(const LightSettings& light)
 		{ m_globalSatSlider, light.globalSaturation, 100.0f },
 		{ m_keyIntensitySlider, light.keyLightIntensity, 100.0f },
 		{ m_fillIntensitySlider, light.fillLightIntensity, 100.0f },
+		{ m_ssaoIntensitySlider, light.ssaoIntensity, 100.0f },
+		{ m_outlineSilhouetteAngleSlider, light.outlineSilhouetteAngleTolerance, 100.0f },
 		{ m_outlineStrengthSlider, light.outlineWidthScale, 100.0f },
 		{ m_outlineOpacitySlider, light.outlineOpacityScale, 100.0f },
+		{ m_nonSilhouetteOutlineWidthSlider, light.outlineNonSilhouetteWidthScale, 100.0f },
+		{ m_nonSilhouetteOutlineOpacitySlider, light.outlineNonSilhouetteOpacityScale, 100.0f },
+		{ m_nonSilhouetteOutlineAngleSlider, light.outlineNonSilhouetteAngleTolerance, 100.0f },
 		{ m_toonContrastSlider, light.toonContrast, 100.0f },
 		{ m_shadowSatSlider, light.shadowSaturationBoost, 100.0f },
 		{ m_shadowDeepThresholdSlider, light.shadowDeepThreshold, 100.0f },
 		{ m_shadowDeepSoftSlider, light.shadowDeepSoftness, 100.0f },
 		{ m_shadowDeepMulSlider, light.shadowDeepMul, 100.0f },
-		{ m_faceShadowMulSlider, light.faceShadowMul, 100.0f },
-		{ m_faceContrastMulSlider, light.faceToonContrastMul, 100.0f },
 		{ m_rimWidthSlider, light.rimWidth, 100.0f },
 		{ m_rimIntensitySlider, light.rimIntensity, 100.0f },
 		{ m_specularStepSlider, light.specularStep, 100.0f },
@@ -1692,15 +1866,18 @@ void SettingsWindow::ReadLightScalarControls(LightSettings& light) const
 		{ &light.globalSaturation, m_globalSatSlider, 100.0f },
 		{ &light.keyLightIntensity, m_keyIntensitySlider, 100.0f },
 		{ &light.fillLightIntensity, m_fillIntensitySlider, 100.0f },
+		{ &light.ssaoIntensity, m_ssaoIntensitySlider, 100.0f },
+		{ &light.outlineSilhouetteAngleTolerance, m_outlineSilhouetteAngleSlider, 100.0f },
 		{ &light.outlineWidthScale, m_outlineStrengthSlider, 100.0f },
 		{ &light.outlineOpacityScale, m_outlineOpacitySlider, 100.0f },
+		{ &light.outlineNonSilhouetteWidthScale, m_nonSilhouetteOutlineWidthSlider, 100.0f },
+		{ &light.outlineNonSilhouetteOpacityScale, m_nonSilhouetteOutlineOpacitySlider, 100.0f },
+		{ &light.outlineNonSilhouetteAngleTolerance, m_nonSilhouetteOutlineAngleSlider, 100.0f },
 		{ &light.toonContrast, m_toonContrastSlider, 100.0f },
 		{ &light.shadowSaturationBoost, m_shadowSatSlider, 100.0f },
 		{ &light.shadowDeepThreshold, m_shadowDeepThresholdSlider, 100.0f },
 		{ &light.shadowDeepSoftness, m_shadowDeepSoftSlider, 100.0f },
 		{ &light.shadowDeepMul, m_shadowDeepMulSlider, 100.0f },
-		{ &light.faceShadowMul, m_faceShadowMulSlider, 100.0f },
-		{ &light.faceToonContrastMul, m_faceContrastMulSlider, 100.0f },
 		{ &light.rimWidth, m_rimWidthSlider, 100.0f },
 		{ &light.rimIntensity, m_rimIntensitySlider, 100.0f },
 		{ &light.specularStep, m_specularStepSlider, 100.0f },
@@ -1746,8 +1923,13 @@ void SettingsWindow::UpdateLightValueLabels(const LightSettings& light)
 		{ m_globalSatLabel, light.globalSaturation },
 		{ m_keyIntensityLabel, light.keyLightIntensity },
 		{ m_fillIntensityLabel, light.fillLightIntensity },
+		{ m_ssaoIntensityLabel, light.ssaoIntensity },
+		{ m_outlineSilhouetteAngleLabel, light.outlineSilhouetteAngleTolerance },
 		{ m_outlineStrengthLabel, light.outlineWidthScale },
 		{ m_outlineOpacityLabel, light.outlineOpacityScale },
+		{ m_nonSilhouetteOutlineWidthLabel, light.outlineNonSilhouetteWidthScale },
+		{ m_nonSilhouetteOutlineOpacityLabel, light.outlineNonSilhouetteOpacityScale },
+		{ m_nonSilhouetteOutlineAngleLabel, light.outlineNonSilhouetteAngleTolerance },
 		{ m_toonContrastLabel, light.toonContrast },
 		{ m_shadowHueLabel, light.shadowHueShiftDeg },
 		{ m_shadowSatLabel, light.shadowSaturationBoost },
@@ -1758,8 +1940,6 @@ void SettingsWindow::UpdateLightValueLabels(const LightSettings& light)
 		{ m_shadowDeepThresholdLabel, light.shadowDeepThreshold },
 		{ m_shadowDeepSoftLabel, light.shadowDeepSoftness },
 		{ m_shadowDeepMulLabel, light.shadowDeepMul },
-		{ m_faceShadowMulLabel, light.faceShadowMul },
-		{ m_faceContrastMulLabel, light.faceToonContrastMul },
 	};
 	for (const auto& binding : labelBindings)
 	{
@@ -1771,22 +1951,41 @@ void SettingsWindow::UpdateLightDependentControlState(const LightSettings& light
 {
 	const bool usesMsaa =
 		light.antiAliasingMode == static_cast<int>(AntiAliasingMode::Msaa) ||
-		light.antiAliasingMode == static_cast<int>(AntiAliasingMode::MsaaFxaa);
+		light.antiAliasingMode == static_cast<int>(AntiAliasingMode::MsaaFxaa) ||
+		light.antiAliasingMode == static_cast<int>(AntiAliasingMode::MsaaSmaa);
 	SetControlsEnabled({ m_msaaSamplesCombo }, usesMsaa);
 	SetControlsEnabled({ m_shadowResolutionCombo }, light.selfShadowEnabled);
+	SetControlsEnabled({ m_ssaoIntensitySlider, m_ssaoIntensityLabel }, light.ssaoEnabled);
 	SetControlsEnabled(
 		{ m_outlineStrengthSlider, m_outlineStrengthLabel, m_outlineOpacitySlider, m_outlineOpacityLabel },
 		light.outlineEnabled);
 	SetControlsEnabled(
-		{ m_faceShadowMulSlider, m_faceShadowMulLabel, m_faceContrastMulSlider, m_faceContrastMulLabel },
-		light.faceMaterialOverridesEnabled);
+		{ m_outlineSilhouetteModeCheck },
+		light.outlineEnabled);
+	const bool silhouetteModeEnabled = light.outlineEnabled && light.outlineSilhouetteModeEnabled;
+	SetControlsEnabled(
+		{ m_outlineSilhouetteAngleSlider, m_outlineSilhouetteAngleLabel, m_nonSilhouetteOutlineCheck },
+		silhouetteModeEnabled);
+	SetControlsEnabled(
+		{ m_nonSilhouetteOutlineWidthSlider,
+		  m_nonSilhouetteOutlineWidthLabel,
+		  m_nonSilhouetteOutlineOpacitySlider,
+		  m_nonSilhouetteOutlineOpacityLabel,
+		  m_nonSilhouetteOutlineAngleSlider,
+		  m_nonSilhouetteOutlineAngleLabel },
+		silhouetteModeEnabled && light.outlineNonSilhouetteEnabled);
 }
+
 
 void SettingsWindow::LoadCurrentSettings()
 {
 	const auto& settings = m_app.Settings();
 	LoadGeneralSettings(settings);
+
+	m_loadingSettings = true;
 	LoadLightSettings(settings.light);
+	m_loadingSettings = false;
+
 	LoadPhysicsSettings(settings.physics);
 
 	UpdatePhysicsAdvancedVisibility();
@@ -1839,6 +2038,17 @@ void SettingsWindow::BuildGeneralSettingsFromUi(AppSettings& out) const
 
 	int fps = GetEditBoxInt(m_fpsEdit, out.targetFps);
 	out.targetFps = std::clamp(fps, 1, 240);
+	out.renderResolutionMode = std::clamp(
+		static_cast<int>(SendMessageW(m_renderResolutionModeCombo, CB_GETCURSEL, 0, 0)),
+		0,
+		2);
+	out.renderScalePercent = std::clamp(GetEditBoxInt(m_renderScaleEdit, out.renderScalePercent), 10, 800);
+	{
+		const int customWidth = GetEditBoxInt(m_renderCustomWidthEdit, out.renderCustomWidth);
+		const int customHeight = GetEditBoxInt(m_renderCustomHeightEdit, out.renderCustomHeight);
+		out.renderCustomWidth = (customWidth > 0) ? std::clamp(customWidth, 16, 8192) : 0;
+		out.renderCustomHeight = (customHeight > 0) ? std::clamp(customHeight, 16, 8192) : 0;
+	}
 
 	int sel = (int)SendMessageW(m_presetModeCombo, CB_GETCURSEL, 0, 0);
 	if (sel >= 0) out.globalPresetMode = static_cast<PresetMode>(sel);
@@ -1849,13 +2059,16 @@ void SettingsWindow::BuildLightSettingsFromUi(LightSettings& light) const
 	ReadLightScalarControls(light);
 	light.toonEnabled = IsChecked(m_toonEnableCheck);
 	light.selfShadowEnabled = IsChecked(m_selfShadowCheck);
+	light.ssaoEnabled = IsChecked(m_ssaoCheck);
 	light.outlineEnabled = IsChecked(m_outlineCheck);
-	light.antiAliasingMode = std::clamp(static_cast<int>(SendMessageW(m_aaModeCombo, CB_GETCURSEL, 0, 0)), 0, 3);
+	light.outlineSilhouetteModeEnabled = IsChecked(m_outlineSilhouetteModeCheck);
+	light.outlineNonSilhouetteEnabled = IsChecked(m_nonSilhouetteOutlineCheck);
+	light.antiAliasingMode = std::clamp(static_cast<int>(SendMessageW(m_aaModeCombo, CB_GETCURSEL, 0, 0)), 0, 5);
 	light.msaaSampleCount = GetComboSelectionItemData(m_msaaSamplesCombo, light.msaaSampleCount);
 	light.shadowMapSize = GetComboSelectionItemData(m_shadowResolutionCombo, light.shadowMapSize);
 	light.toonDebugView = std::clamp(static_cast<int>(SendMessageW(m_toonDebugViewCombo, CB_GETCURSEL, 0, 0)), 0, 12);
-	light.faceMaterialOverridesEnabled = IsChecked(m_faceMaterialOverridesCheck);
 }
+
 
 void SettingsWindow::BuildPhysicsSettingsFromUi(PhysicsSettings& physics) const
 {
@@ -1910,12 +2123,19 @@ void SettingsWindow::UpdateFpsControlState()
 	EnableWindow(m_vsyncCheck, !unlimited);
 }
 
-void SettingsWindow::UpdateFaceMaterialControlState()
+void SettingsWindow::UpdateRenderResolutionControlState()
 {
-	SetControlsEnabled(
-		{ m_faceShadowMulSlider, m_faceShadowMulLabel, m_faceContrastMulSlider, m_faceContrastMulLabel },
-		IsChecked(m_faceMaterialOverridesCheck));
+	const int mode = std::clamp(
+		static_cast<int>(SendMessageW(m_renderResolutionModeCombo, CB_GETCURSEL, 0, 0)),
+		0,
+		2);
+	const bool useScale = mode == static_cast<int>(RenderResolutionMode::ScalePercent);
+	const bool useCustom = mode == static_cast<int>(RenderResolutionMode::Custom);
+	EnableWindow(m_renderScaleEdit, useScale ? TRUE : FALSE);
+	EnableWindow(m_renderCustomWidthEdit, useCustom ? TRUE : FALSE);
+	EnableWindow(m_renderCustomHeightEdit, useCustom ? TRUE : FALSE);
 }
+
 
 bool SettingsWindow::HasUnsavedChanges() const
 {
@@ -2004,15 +2224,7 @@ LRESULT SettingsWindow::WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
 		case WM_APP_NAV_CHANGED:
 		{
 			const int idx = static_cast<int>(wParam);
-			const int pad = 6;
-			switch (idx)
-			{
-				case 0: ScrollTo(m_sectionYBasic - pad); break;
-				case 1: ScrollTo(m_sectionYLight - pad); break;
-				case 2: ScrollTo(m_sectionYToon - pad); break;
-				case 3: ScrollTo(m_sectionYPhysics - pad); break;
-				default: break;
-			}
+			if (idx >= 0 && idx <= 3) ShowSection(idx);
 			return 0;
 		}
 
@@ -2101,6 +2313,7 @@ LRESULT SettingsWindow::WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
 					if (PickColor(light.keyLightColorR, light.keyLightColorG, light.keyLightColorB, m_keyColorBtn))
 					{
 						m_app.UpdateLiveLightSettings(light);
+						InvalidateRect(m_keyColorPreview, nullptr, TRUE);
 						InvalidateRect(m_hwnd, nullptr, TRUE);
 					}
 					return 0;
@@ -2110,14 +2323,17 @@ LRESULT SettingsWindow::WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
 					if (PickColor(light.fillLightColorR, light.fillLightColorG, light.fillLightColorB, m_fillColorBtn))
 					{
 						m_app.UpdateLiveLightSettings(light);
+						InvalidateRect(m_fillColorPreview, nullptr, TRUE);
 						InvalidateRect(m_hwnd, nullptr, TRUE);
 					}
 					return 0;
 				}
 				case ID_TOON_ENABLE: UpdateLightPreview(); return 0;
 				case ID_SELF_SHADOW_ENABLE: UpdateLightPreview(); return 0;
+				case ID_SSAO_ENABLE: UpdateLightPreview(); return 0;
 				case ID_OUTLINE_ENABLE: UpdateLightPreview(); return 0;
-				case ID_FACE_OVERRIDE_ENABLE: UpdateLightPreview(); return 0;
+				case ID_OUTLINE_SILHOUETTE_MODE_ENABLE: UpdateLightPreview(); return 0;
+				case ID_OUTLINE_NON_SILHOUETTE_ENABLE: UpdateLightPreview(); return 0;
 				case ID_AA_MODE_COMBO:
 				case ID_MSAA_SAMPLES_COMBO:
 				case ID_SHADOW_RESOLUTION_COMBO:
@@ -2131,6 +2347,15 @@ LRESULT SettingsWindow::WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
 				case ID_FPS_LIMIT_TO_REFRESH:
 				case ID_FPS_VSYNC:
 					UpdateFpsControlState();
+					return 0;
+				case ID_RENDER_RES_MODE_COMBO:
+					if (HIWORD(wParam) == CBN_SELCHANGE)
+					{
+						UpdateRenderResolutionControlState();
+					}
+					return 0;
+				case ID_PHYS_ADVANCED_TOGGLE:
+					TogglePhysicsAdvanced();
 					return 0;
 				case ID_RESET_LIGHT: {
 					LightSettings defaultLight;
@@ -2187,7 +2412,7 @@ LRESULT SettingsWindow::WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
 			break;
 
 		case WM_HSCROLL:
-			UpdateLightPreview();
+			if (!m_loadingSettings) UpdateLightPreview();
 			return 0;
 
 		case WM_DRAWITEM: {

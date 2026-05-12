@@ -28,17 +28,25 @@ namespace
 	constexpr DXGI_FORMAT kAuxToonRenderTargetFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 	constexpr DXGI_FORMAT kAuxOutlineRenderTargetFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 	constexpr DXGI_FORMAT kAuxEdgeColorRenderTargetFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+	constexpr DXGI_FORMAT kSmaaWeightsFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 
 	bool UsesMsaaMode(int mode) noexcept
 	{
 		return mode == static_cast<int>(AntiAliasingMode::Msaa) ||
-			   mode == static_cast<int>(AntiAliasingMode::MsaaFxaa);
+			   mode == static_cast<int>(AntiAliasingMode::MsaaFxaa) ||
+			   mode == static_cast<int>(AntiAliasingMode::MsaaSmaa);
 	}
 
 	bool UsesFxaaMode(int mode) noexcept
 	{
 		return mode == static_cast<int>(AntiAliasingMode::Fxaa) ||
 			   mode == static_cast<int>(AntiAliasingMode::MsaaFxaa);
+	}
+
+	bool UsesSmaaMode(int mode) noexcept
+	{
+		return mode == static_cast<int>(AntiAliasingMode::Smaa) ||
+			   mode == static_cast<int>(AntiAliasingMode::MsaaSmaa);
 	}
 
 	DXGI_SWAP_CHAIN_DESC1 MakeSwapChainDesc(UINT w, UINT h)
@@ -78,6 +86,11 @@ namespace
 		if (requested >= 1024) return 1024;
 		if (requested >= 512) return 512;
 		return 256;
+	}
+
+	int NormalizeRenderScalePercent(int percent) noexcept
+	{
+		return std::clamp(percent, 10, 800);
 	}
 
 	bool NearlyEqualFloat(float lhs, float rhs, float epsilon = 1e-4f) noexcept
@@ -153,6 +166,65 @@ void DcompRenderer::SetResizeOverlayEnabled(bool enabled)
 	m_resizeOverlayEnabled = enabled;
 }
 
+std::pair<UINT, UINT> DcompRenderer::ComputeRenderSizeFromOutput(UINT outputWidth, UINT outputHeight) const
+{
+	UINT renderWidth = outputWidth;
+	UINT renderHeight = outputHeight;
+
+	const int mode = std::clamp(
+		m_renderResolutionMode,
+		static_cast<int>(RenderResolutionMode::ClientSize),
+		static_cast<int>(RenderResolutionMode::Custom));
+
+	if (mode == static_cast<int>(RenderResolutionMode::ScalePercent))
+	{
+		const double scale = static_cast<double>(NormalizeRenderScalePercent(m_renderScalePercent)) / 100.0;
+		renderWidth = static_cast<UINT>((std::max)(1LL, static_cast<long long>(std::llround(static_cast<double>(outputWidth) * scale))));
+		renderHeight = static_cast<UINT>((std::max)(1LL, static_cast<long long>(std::llround(static_cast<double>(outputHeight) * scale))));
+	}
+	else if (mode == static_cast<int>(RenderResolutionMode::Custom) &&
+		m_renderCustomWidth > 0 &&
+		m_renderCustomHeight > 0)
+	{
+		renderWidth = static_cast<UINT>(m_renderCustomWidth);
+		renderHeight = static_cast<UINT>(m_renderCustomHeight);
+	}
+
+	renderWidth = std::clamp(renderWidth, 1u, 8192u);
+	renderHeight = std::clamp(renderHeight, 1u, 8192u);
+	return { renderWidth, renderHeight };
+}
+
+void DcompRenderer::SetRenderResolutionSettings(int mode, int scalePercent, int customWidth, int customHeight)
+{
+	const int normalizedMode = std::clamp(
+		mode,
+		static_cast<int>(RenderResolutionMode::ClientSize),
+		static_cast<int>(RenderResolutionMode::Custom));
+	const int normalizedScale = NormalizeRenderScalePercent(scalePercent);
+	const int normalizedCustomWidth = (customWidth > 0) ? std::clamp(customWidth, 16, 8192) : 0;
+	const int normalizedCustomHeight = (customHeight > 0) ? std::clamp(customHeight, 16, 8192) : 0;
+
+	if (m_renderResolutionMode == normalizedMode &&
+		m_renderScalePercent == normalizedScale &&
+		m_renderCustomWidth == normalizedCustomWidth &&
+		m_renderCustomHeight == normalizedCustomHeight)
+	{
+		return;
+	}
+
+	m_renderResolutionMode = normalizedMode;
+	m_renderScalePercent = normalizedScale;
+	m_renderCustomWidth = normalizedCustomWidth;
+	m_renderCustomHeight = normalizedCustomHeight;
+	m_renderResolutionDirty = true;
+
+	if (m_swapChain)
+	{
+		ResizeIfNeeded();
+	}
+}
+
 void DcompRenderer::AdjustBrightness(float delta)
 {
 	m_lightSettings.brightness += delta;
@@ -184,14 +256,19 @@ void DcompRenderer::ReportProgress(float value, const wchar_t* msg)
 	}
 }
 
-void DcompRenderer::Initialize(HWND hwnd, ProgressCallback progress)
+void DcompRenderer::Initialize(HWND hwnd, bool useDirectComposition, ProgressCallback progress)
 {
 	m_hwnd = hwnd;
+	m_useDirectComposition = useDirectComposition;
 	m_progressCallback = std::move(progress);
 
 	const SIZE clientSize = Win32UiUtil::GetClientSize(m_hwnd);
-	m_width = static_cast<UINT>(clientSize.cx);
-	m_height = static_cast<UINT>(clientSize.cy);
+	m_outputWidth = static_cast<UINT>((std::max)(1L, clientSize.cx));
+	m_outputHeight = static_cast<UINT>((std::max)(1L, clientSize.cy));
+	const auto initialRenderSize = ComputeRenderSizeFromOutput(m_outputWidth, m_outputHeight);
+	m_width = initialRenderSize.first;
+	m_height = initialRenderSize.second;
+	m_renderResolutionDirty = false;
 
 	ReportProgress(0.05f, L"Direct3D を初期化しています...");
 	CreateD3D();
@@ -207,7 +284,10 @@ void DcompRenderer::Initialize(HWND hwnd, ProgressCallback progress)
 
 	CreateSwapChain();
 	CreateRenderTargets();
-	CreateDirectCompositionTree();
+	if (m_useDirectComposition)
+	{
+		CreateDirectCompositionTree();
+	}
 
 	ReportProgress(0.30f, L"テクスチャ用のリソースを初期化しています...");
 	m_gpuResources.CreateSrvHeap();
@@ -278,6 +358,9 @@ void DcompRenderer::ReleaseToonAuxiliaryResources()
 	m_msaaAuxOutlineTex = nullptr;
 	m_msaaAuxEdgeColorTex = nullptr;
 	m_toonCompositeTex = nullptr;
+	m_smaaEdgesTex = nullptr;
+	m_smaaBlendTex = nullptr;
+	m_smaaOutputTex = nullptr;
 	m_auxNormalState = D3D12_RESOURCE_STATE_RENDER_TARGET;
 	m_auxToonState = D3D12_RESOURCE_STATE_RENDER_TARGET;
 	m_auxOutlineState = D3D12_RESOURCE_STATE_RENDER_TARGET;
@@ -287,6 +370,9 @@ void DcompRenderer::ReleaseToonAuxiliaryResources()
 	m_msaaAuxOutlineState = D3D12_RESOURCE_STATE_RENDER_TARGET;
 	m_msaaAuxEdgeColorState = D3D12_RESOURCE_STATE_RENDER_TARGET;
 	m_toonCompositeState = D3D12_RESOURCE_STATE_RENDER_TARGET;
+	m_smaaEdgesState = D3D12_RESOURCE_STATE_RENDER_TARGET;
+	m_smaaBlendState = D3D12_RESOURCE_STATE_RENDER_TARGET;
+	m_smaaOutputState = D3D12_RESOURCE_STATE_RENDER_TARGET;
 	m_auxNormalRtvHandle = {};
 	m_auxToonRtvHandle = {};
 	m_auxOutlineRtvHandle = {};
@@ -296,6 +382,9 @@ void DcompRenderer::ReleaseToonAuxiliaryResources()
 	m_msaaAuxOutlineRtvHandle = {};
 	m_msaaAuxEdgeColorRtvHandle = {};
 	m_toonCompositeRtvHandle = {};
+	m_smaaEdgesRtvHandle = {};
+	m_smaaBlendRtvHandle = {};
+	m_smaaOutputRtvHandle = {};
 }
 
 void DcompRenderer::CreateToonAuxiliaryResources()
@@ -349,18 +438,25 @@ void DcompRenderer::CreateToonAuxiliaryResources()
 	const float outlineClear[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
 	const float edgeColorClear[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 	const float sceneClear[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+	const float smaaClear[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 
 	createRt(kAuxNormalRenderTargetFormat, 1, 0, normalClear, ToonRtv_AuxNormal, m_auxNormalTex);
 	createRt(kAuxToonRenderTargetFormat, 1, 0, toonClear, ToonRtv_AuxToon, m_auxToonTex);
 	createRt(kAuxOutlineRenderTargetFormat, 1, 0, outlineClear, ToonRtv_AuxOutline, m_auxOutlineTex);
 	createRt(kAuxEdgeColorRenderTargetFormat, 1, 0, edgeColorClear, ToonRtv_AuxEdgeColor, m_auxEdgeColorTex);
 	createRt(kSceneRenderTargetFormat, 1, 0, sceneClear, ToonRtv_Composite, m_toonCompositeTex);
+	createRt(kSmaaWeightsFormat, 1, 0, smaaClear, ToonRtv_SmaaEdges, m_smaaEdgesTex);
+	createRt(kSmaaWeightsFormat, 1, 0, smaaClear, ToonRtv_SmaaBlend, m_smaaBlendTex);
+	createRt(kSceneRenderTargetFormat, 1, 0, sceneClear, ToonRtv_SmaaOutput, m_smaaOutputTex);
 
 	m_auxNormalRtvHandle = getRtv(ToonRtv_AuxNormal);
 	m_auxToonRtvHandle = getRtv(ToonRtv_AuxToon);
 	m_auxOutlineRtvHandle = getRtv(ToonRtv_AuxOutline);
 	m_auxEdgeColorRtvHandle = getRtv(ToonRtv_AuxEdgeColor);
 	m_toonCompositeRtvHandle = getRtv(ToonRtv_Composite);
+	m_smaaEdgesRtvHandle = getRtv(ToonRtv_SmaaEdges);
+	m_smaaBlendRtvHandle = getRtv(ToonRtv_SmaaBlend);
+	m_smaaOutputRtvHandle = getRtv(ToonRtv_SmaaOutput);
 
 	if (m_msaaSampleCount > 1)
 	{
@@ -481,7 +577,7 @@ void DcompRenderer::CreatePostProcessResources()
 		m_ctx.Device()->CreateShaderResourceView(m_intermediateTex.get(), &srvDesc, srvHandle);
 	}
 
-	// Depth SRV (only for non-MSAA; our SSAO shader uses Texture2D, not Texture2DMS)
+	// Depth SRV: hardware depth for non-MSAA, PMX proxy depth from aux outline for MSAA.
 	if (m_depth && m_msaaSampleCount <= 1)
 	{
 		D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
@@ -526,6 +622,9 @@ void DcompRenderer::CreatePostProcessResources()
 	createTextureSrv(m_auxOutlineTex.get(), kAuxOutlineRenderTargetFormat, PP_AuxOutlineSrv);
 	createTextureSrv(m_auxEdgeColorTex.get(), kAuxEdgeColorRenderTargetFormat, PP_AuxEdgeColorSrv);
 	createTextureSrv(m_toonCompositeTex.get(), kSceneRenderTargetFormat, PP_ToonCompositeSrv);
+	createTextureSrv(m_smaaEdgesTex.get(), kSmaaWeightsFormat, PP_SmaaEdgesSrv);
+	createTextureSrv(m_smaaBlendTex.get(), kSmaaWeightsFormat, PP_SmaaBlendSrv);
+	createTextureSrv(m_smaaOutputTex.get(), kSceneRenderTargetFormat, PP_SmaaOutputSrv);
 }
 
 void DcompRenderer::CreateShadowResources()
@@ -594,9 +693,11 @@ void DcompRenderer::UpdateRenderModeResources()
 	CreateShadowResources();
 	m_pipeline.CreatePmxPipeline(m_msaaSampleCount, m_msaaQuality);
 	m_pipeline.CreateEdgePipeline(m_msaaSampleCount, m_msaaQuality);
+	m_pipeline.CreateEdgeCapturePipeline(m_msaaSampleCount, m_msaaQuality);
 	m_pipeline.CreateSsaoPipeline();
 	m_pipeline.CreateBloomPipeline();
 	m_pipeline.CreateToonCompositePipeline();
+	m_pipeline.CreateSmaaPipelines();
 	m_pipeline.CreateToneMapPipeline();
 }
 
@@ -702,10 +803,19 @@ void DcompRenderer::CreateCommandObjects()
 
 void DcompRenderer::CreateSwapChain()
 {
-	DXGI_SWAP_CHAIN_DESC1 desc = MakeSwapChainDesc(m_width, m_height);
+	DXGI_SWAP_CHAIN_DESC1 desc = MakeSwapChainDesc(m_outputWidth, m_outputHeight);
 
-	DX_CALL(m_ctx.Factory()->CreateSwapChainForComposition(
-		m_ctx.Queue(), &desc, nullptr, m_swapChain1.put()));
+	if (m_useDirectComposition)
+	{
+		DX_CALL(m_ctx.Factory()->CreateSwapChainForComposition(
+			m_ctx.Queue(), &desc, nullptr, m_swapChain1.put()));
+	}
+	else
+	{
+		desc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
+		DX_CALL(m_ctx.Factory()->CreateSwapChainForHwnd(
+			m_ctx.Queue(), m_hwnd, &desc, nullptr, nullptr, m_swapChain1.put()));
+	}
 
 	DX_CALL(m_swapChain1->QueryInterface(__uuidof(IDXGISwapChain3), m_swapChain.put_void()));
 }
@@ -740,27 +850,42 @@ void DcompRenderer::CreateRenderTargets()
 void DcompRenderer::ResizeIfNeeded()
 {
 	const SIZE clientSize = Win32UiUtil::GetClientSize(m_hwnd);
-	const UINT newW = static_cast<UINT>(clientSize.cx);
-	const UINT newH = static_cast<UINT>(clientSize.cy);
-	if (newW == m_width && newH == m_height) return;
+	const UINT newOutputWidth = static_cast<UINT>((std::max)(1L, clientSize.cx));
+	const UINT newOutputHeight = static_cast<UINT>((std::max)(1L, clientSize.cy));
+	const bool outputChanged = (newOutputWidth != m_outputWidth) || (newOutputHeight != m_outputHeight);
+	const auto newRenderSize = ComputeRenderSizeFromOutput(newOutputWidth, newOutputHeight);
+	const bool renderChanged = (newRenderSize.first != m_width) || (newRenderSize.second != m_height);
+	if (!outputChanged && !renderChanged && !m_renderResolutionDirty)
+	{
+		return;
+	}
 
 	WaitForGpu();
 
-	m_width = newW;
-	m_height = newH;
+	m_outputWidth = newOutputWidth;
+	m_outputHeight = newOutputHeight;
 
-	for (UINT i = 0; i < FrameCount; ++i)
+	if (outputChanged)
 	{
-		m_renderTargets[i] = nullptr;
+		for (UINT i = 0; i < FrameCount; ++i)
+		{
+			m_renderTargets[i] = nullptr;
+		}
+
+		DX_CALL(m_swapChain->ResizeBuffers(
+			FrameCount, m_outputWidth, m_outputHeight, kPresentRenderTargetFormat, 0));
+
+		CreateRenderTargets();
 	}
 
-	m_depth = nullptr;
+	if (renderChanged || m_renderResolutionDirty)
+	{
+		m_width = newRenderSize.first;
+		m_height = newRenderSize.second;
+		UpdateRenderModeResources();
+	}
 
-	DX_CALL(m_swapChain->ResizeBuffers(
-		FrameCount, m_width, m_height, kPresentRenderTargetFormat, 0));
-
-	CreateRenderTargets();
-	UpdateRenderModeResources();
+	m_renderResolutionDirty = false;
 }
 
 void DcompRenderer::Render(const MmdAnimator& animator)
@@ -894,8 +1019,8 @@ void DcompRenderer::Render(const MmdAnimator& animator)
 		const float refFov = XMConvertToRadians(30.0f);
 		const float K = 600.0f / std::tan(refFov * 0.5f); // tan(fov/2)=H/K
 		const float dpiScale = GetWindowDpiScale(m_hwnd);
-		const float logicalWidth = (m_width > 0) ? static_cast<float>(m_width) / dpiScale : 400.0f;
-		const float logicalHeight = (m_height > 0) ? static_cast<float>(m_height) / dpiScale : 600.0f;
+		const float logicalWidth = (m_outputWidth > 0) ? static_cast<float>(m_outputWidth) / dpiScale : 400.0f;
+		const float logicalHeight = (m_outputHeight > 0) ? static_cast<float>(m_outputHeight) / dpiScale : 600.0f;
 		const float tanHalfFov = logicalHeight / K;
 		float fovY = 2.0f * std::atan(tanHalfFov);
 		fovY = std::clamp(fovY, XMConvertToRadians(10.0f), XMConvertToRadians(100.0f));
@@ -932,7 +1057,7 @@ void DcompRenderer::Render(const MmdAnimator& animator)
 			M_track *
 			XMMatrixTranslationFromVector(XMVectorScale(upWorld, snapT));
 
-		m_camera.CacheMatrices(frame.model, frame.view, frame.proj, m_width, m_height);
+		m_camera.CacheMatrices(frame.model, frame.view, frame.proj, m_outputWidth, m_outputHeight);
 		return frame;
 	};
 
@@ -1424,32 +1549,54 @@ void DcompRenderer::Render(const MmdAnimator& animator)
 		DrawMats(m_pipeline.GetPmxPsoTrans(), m_transCull);
 		DrawMats(m_pipeline.GetPmxPsoTransNoCull(), m_transNoCull);
 
-		if (m_lightSettings.outlineEnabled &&
+		const bool outlineDrawActive =
+			m_lightSettings.outlineEnabled &&
 			m_lightSettings.outlineWidthScale > 0.001f &&
-			m_lightSettings.outlineOpacityScale > 0.001f)
+			m_lightSettings.outlineOpacityScale > 0.001f;
+		if (outlineDrawActive)
 		{
-			m_cmdList->SetPipelineState(m_pipeline.GetEdgePso());
-			m_cmdList->SetGraphicsRootSignature(m_pipeline.GetPmxRootSignature());
-			m_cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-			m_cmdList->IASetVertexBuffers(0, 1, &pmx.vbv);
-			m_cmdList->IASetIndexBuffer(&pmx.ibv);
+			auto DrawEdgeMaterials = [&](ID3D12PipelineState* pso) {
+				if (!pso || m_edgeDrawIndices.empty())
+				{
+					return;
+				}
 
-			if (m_sceneCb[frameIndex])
-			{
-				m_cmdList->SetGraphicsRootConstantBufferView(0, m_sceneCb[frameIndex]->GetGPUVirtualAddress());
-			}
-			if (m_boneCb[frameIndex])
-			{
-				m_cmdList->SetGraphicsRootConstantBufferView(3, m_boneCb[frameIndex]->GetGPUVirtualAddress());
-			}
+				m_cmdList->SetPipelineState(pso);
+				m_cmdList->SetGraphicsRootSignature(m_pipeline.GetPmxRootSignature());
+				m_cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+				m_cmdList->IASetVertexBuffers(0, 1, &pmx.vbv);
+				m_cmdList->IASetIndexBuffer(&pmx.ibv);
 
-			for (size_t i : m_edgeDrawIndices)
+				if (m_sceneCb[frameIndex])
+				{
+					m_cmdList->SetGraphicsRootConstantBufferView(0, m_sceneCb[frameIndex]->GetGPUVirtualAddress());
+				}
+				if (m_boneCb[frameIndex])
+				{
+					m_cmdList->SetGraphicsRootConstantBufferView(3, m_boneCb[frameIndex]->GetGPUVirtualAddress());
+				}
+
+				for (size_t i : m_edgeDrawIndices)
+				{
+					const auto& gm = pmx.materials[i];
+					m_cmdList->SetGraphicsRootConstantBufferView(1, gm.materialCbGpu);
+					m_cmdList->SetGraphicsRootDescriptorTable(2, m_gpuResources.GetSrvGpuHandle(gm.srvBlockIndex));
+					if (gm.mat.indexCount > 0)
+						m_cmdList->DrawIndexedInstanced((UINT)gm.mat.indexCount, 1, (UINT)gm.mat.indexOffset, 0, 0);
+				}
+				};
+
+			if (!m_lightSettings.outlineSilhouetteModeEnabled)
 			{
-				const auto& gm = pmx.materials[i];
-				m_cmdList->SetGraphicsRootConstantBufferView(1, gm.materialCbGpu);
-				m_cmdList->SetGraphicsRootDescriptorTable(2, m_gpuResources.GetSrvGpuHandle(gm.srvBlockIndex));
-				if (gm.mat.indexCount > 0)
-					m_cmdList->DrawIndexedInstanced((UINT)gm.mat.indexCount, 1, (UINT)gm.mat.indexOffset, 0, 0);
+				m_cmdList->OMSetRenderTargets(_countof(sceneRtvs), sceneRtvs, FALSE, &dsvHandle);
+				DrawEdgeMaterials(m_pipeline.GetEdgePso());
+			}
+			else
+			{
+				const float edgeCaptureClear[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+				m_cmdList->OMSetRenderTargets(1, &sceneRtvs[4], FALSE, &dsvHandle);
+				m_cmdList->ClearRenderTargetView(sceneRtvs[4], edgeCaptureClear, 0, nullptr);
+				DrawEdgeMaterials(m_pipeline.GetEdgeCapturePso());
 			}
 		}
 	}
@@ -1585,6 +1732,7 @@ void DcompRenderer::Render(const MmdAnimator& animator)
 		return h;
 	};
 
+	const bool toonDebugActive = m_lightSettings.toonDebugView != static_cast<int>(ToonDebugView::Final);
 	PostProcessDescriptorIndex sceneSourceSrv = PP_IntermediateSrv;
 	if (m_toonCompositeTex && m_pipeline.GetToonCompositePso())
 	{
@@ -1603,29 +1751,40 @@ void DcompRenderer::Render(const MmdAnimator& animator)
 
 		const float useDepthTexture = (m_msaaSampleCount <= 1) ? 1.0f : 0.0f;
 		const float depthEdgeThreshold = (useDepthTexture > 0.5f) ? 0.002f : 0.012f;
-		float toonPostConsts[20] = {
+		const bool outlineActive =
+			m_lightSettings.outlineWidthScale > 0.001f &&
+			m_lightSettings.outlineOpacityScale > 0.001f;
+		float toonPostConsts[28] = {
 			1.0f / static_cast<float>(m_width),
 			1.0f / static_cast<float>(m_height),
 			std::max(0.0f, m_lightSettings.outlineOpacityScale),
 			1.0f,
 			depthEdgeThreshold,
-			0.50f,
+			0.35f,
 			3.0f,
 			std::max(0.0f, m_lightSettings.rimIntensity),
 			0.12f,
 			0.18f,
-			(m_lightSettings.outlineEnabled && m_lightSettings.outlineWidthScale > 0.001f) ? 1.0f : 0.0f,
+			(m_lightSettings.outlineEnabled && outlineActive) ? 1.0f : 0.0f,
 			(m_lightSettings.rimIntensity > 0.001f) ? 1.0f : 0.0f,
 			useDepthTexture,
 			0.55f,
 			0.72f,
 			1.0f,
 			static_cast<float>(std::clamp(m_lightSettings.toonDebugView, 0, 12)),
+			m_lightSettings.outlineSilhouetteModeEnabled ? 1.0f : 0.0f,
+			std::max(0.0f, m_lightSettings.outlineWidthScale),
+			std::clamp(m_lightSettings.outlineSilhouetteAngleTolerance, 0.0f, 1.0f),
+			std::max(0.0f, m_lightSettings.outlineNonSilhouetteWidthScale),
+			std::max(0.0f, m_lightSettings.outlineNonSilhouetteOpacityScale),
+			std::clamp(m_lightSettings.outlineNonSilhouetteAngleTolerance, 0.0f, 1.0f),
+			m_lightSettings.outlineNonSilhouetteEnabled ? 1.0f : 0.0f,
+			0.0f,
 			0.0f,
 			0.0f,
 			0.0f
 		};
-		m_cmdList->SetGraphicsRoot32BitConstants(0, 20, toonPostConsts, 0);
+		m_cmdList->SetGraphicsRoot32BitConstants(0, 28, toonPostConsts, 0);
 		m_cmdList->SetGraphicsRootDescriptorTable(1, GetPostProcessGpuHandle(PP_IntermediateSrv));
 		m_cmdList->SetGraphicsRootDescriptorTable(4, GetPostProcessGpuHandle(PP_DepthSrv));
 		m_cmdList->SetGraphicsRootDescriptorTable(6, GetPostProcessGpuHandle(PP_AuxNormalSrv));
@@ -1641,6 +1800,71 @@ void DcompRenderer::Render(const MmdAnimator& animator)
 		m_cmdList->ResourceBarrier(1, &barrier);
 		m_toonCompositeState = compositeReadState;
 		sceneSourceSrv = PP_ToonCompositeSrv;
+	}
+
+	const bool enableSmaa = UsesSmaaMode(m_lightSettings.antiAliasingMode) && !toonDebugActive;
+	if (enableSmaa &&
+		m_smaaEdgesTex &&
+		m_smaaBlendTex &&
+		m_smaaOutputTex &&
+		m_pipeline.GetSmaaEdgePso() &&
+		m_pipeline.GetSmaaBlendPso() &&
+		m_pipeline.GetSmaaNeighborhoodPso())
+	{
+		auto transitionSmaaResource = [&](ID3D12Resource* resource,
+										  D3D12_RESOURCE_STATES& currentState,
+										  D3D12_RESOURCE_STATES targetState) {
+			if (currentState == targetState)
+			{
+				return;
+			}
+
+			auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(resource, currentState, targetState);
+			m_cmdList->ResourceBarrier(1, &barrier);
+			currentState = targetState;
+		};
+
+		const float smaaConsts[8] = {
+			1.0f / static_cast<float>(m_width),
+			1.0f / static_cast<float>(m_height),
+			0.095f,
+			2.0f,
+			24.0f,
+			0.25f,
+			0.0f,
+			0.0f
+		};
+
+		m_cmdList->SetGraphicsRootSignature(m_pipeline.GetPostProcessRootSignature());
+		m_cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+		transitionSmaaResource(m_smaaEdgesTex.get(), m_smaaEdgesState, D3D12_RESOURCE_STATE_RENDER_TARGET);
+		m_cmdList->OMSetRenderTargets(1, &m_smaaEdgesRtvHandle, FALSE, nullptr);
+		m_cmdList->SetPipelineState(m_pipeline.GetSmaaEdgePso());
+		m_cmdList->SetGraphicsRoot32BitConstants(0, 8, smaaConsts, 0);
+		m_cmdList->SetGraphicsRootDescriptorTable(1, GetPostProcessGpuHandle(sceneSourceSrv));
+		m_cmdList->DrawInstanced(3, 1, 0, 0);
+		transitionSmaaResource(m_smaaEdgesTex.get(), m_smaaEdgesState, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+		transitionSmaaResource(m_smaaBlendTex.get(), m_smaaBlendState, D3D12_RESOURCE_STATE_RENDER_TARGET);
+		m_cmdList->OMSetRenderTargets(1, &m_smaaBlendRtvHandle, FALSE, nullptr);
+		m_cmdList->SetPipelineState(m_pipeline.GetSmaaBlendPso());
+		m_cmdList->SetGraphicsRoot32BitConstants(0, 8, smaaConsts, 0);
+		m_cmdList->SetGraphicsRootDescriptorTable(1, GetPostProcessGpuHandle(PP_SmaaEdgesSrv));
+		m_cmdList->DrawInstanced(3, 1, 0, 0);
+		transitionSmaaResource(m_smaaBlendTex.get(), m_smaaBlendState, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+		transitionSmaaResource(m_smaaOutputTex.get(), m_smaaOutputState, D3D12_RESOURCE_STATE_RENDER_TARGET);
+		m_cmdList->OMSetRenderTargets(1, &m_smaaOutputRtvHandle, FALSE, nullptr);
+		m_cmdList->SetPipelineState(m_pipeline.GetSmaaNeighborhoodPso());
+		m_cmdList->SetGraphicsRoot32BitConstants(0, 8, smaaConsts, 0);
+		m_cmdList->SetGraphicsRootDescriptorTable(1, GetPostProcessGpuHandle(sceneSourceSrv));
+		m_cmdList->SetGraphicsRootDescriptorTable(2, GetPostProcessGpuHandle(PP_SmaaBlendSrv));
+		m_cmdList->DrawInstanced(3, 1, 0, 0);
+		const D3D12_RESOURCE_STATES smaaOutputReadState =
+			D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+		transitionSmaaResource(m_smaaOutputTex.get(), m_smaaOutputState, smaaOutputReadState);
+		sceneSourceSrv = PP_SmaaOutputSrv;
 	}
 
 	// Ensure compute resources are in UAV state
@@ -1668,20 +1892,29 @@ void DcompRenderer::Render(const MmdAnimator& animator)
 		}
 	}
 
-	// SSAO (disabled when MSAA is active because depth is multisampled)
-	if (m_lightSettings.ssaoEnabled && m_msaaSampleCount <= 1 && m_ssaoTex && m_postProcessHeap)
+	// SSAO. MSAA uses the resolved PMX proxy depth stored in aux outline alpha.
+	if (m_lightSettings.ssaoEnabled && m_ssaoTex && m_postProcessHeap)
 	{
 		m_cmdList->SetComputeRootSignature(m_pipeline.GetPostProcessRootSignature());
 		m_cmdList->SetPipelineState(m_pipeline.GetSsaoPso());
-		XMMATRIX proj = XMMatrixTranspose(XMLoadFloat4x4(reinterpret_cast<const XMFLOAT4X4*>(&scene->proj)));
+		XMMATRIX proj = frameTransform.proj;
 		XMMATRIX invProj = XMMatrixInverse(nullptr, proj);
 		XMFLOAT4X4 invProjStore;
 		XMStoreFloat4x4(&invProjStore, invProj);
-		float ssaoConsts[16];
+		float ssaoConsts[24]{};
 		for (int i = 0; i < 4; ++i)
 			for (int j = 0; j < 4; ++j)
 				ssaoConsts[i * 4 + j] = invProjStore.m[i][j];
-		m_cmdList->SetComputeRoot32BitConstants(0, 16, ssaoConsts, 0);
+		const float ssaoRadius = std::clamp(frameTransform.distance * 0.055f, 0.08f, 0.28f);
+		ssaoConsts[16] = 1.0f / static_cast<float>(m_width);
+		ssaoConsts[17] = 1.0f / static_cast<float>(m_height);
+		ssaoConsts[18] = ssaoRadius;
+		ssaoConsts[19] = 0.025f;
+		ssaoConsts[20] = 2.2f;
+		ssaoConsts[21] = 1.15f;
+		ssaoConsts[22] = (m_msaaSampleCount <= 1) ? 0.0f : 1.0f;
+		ssaoConsts[23] = 0.0f;
+		m_cmdList->SetComputeRoot32BitConstants(0, 24, ssaoConsts, 0);
 		m_cmdList->SetComputeRootDescriptorTable(1, GetPostProcessGpuHandle(PP_DepthSrv));
 		m_cmdList->SetComputeRootDescriptorTable(5, GetPostProcessGpuHandle(PP_SsaoUav));
 		m_cmdList->Dispatch((m_width + 7) / 8, (m_height + 7) / 8, 1);
@@ -1782,6 +2015,15 @@ void DcompRenderer::Render(const MmdAnimator& animator)
 	auto backBufferRtv = m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
 	backBufferRtv.ptr += (SIZE_T)frameIndex * m_rtvDescriptorSize;
 	m_cmdList->OMSetRenderTargets(1, &backBufferRtv, FALSE, nullptr);
+	D3D12_VIEWPORT backBufferViewport{};
+	backBufferViewport.Width = static_cast<float>(m_outputWidth);
+	backBufferViewport.Height = static_cast<float>(m_outputHeight);
+	backBufferViewport.MaxDepth = 1.0f;
+	D3D12_RECT backBufferScissor{};
+	backBufferScissor.right = static_cast<LONG>(m_outputWidth);
+	backBufferScissor.bottom = static_cast<LONG>(m_outputHeight);
+	m_cmdList->RSSetViewports(1, &backBufferViewport);
+	m_cmdList->RSSetScissorRects(1, &backBufferScissor);
 
 	// ToneMap composite pass
 	m_cmdList->SetGraphicsRootSignature(m_pipeline.GetPostProcessRootSignature());
@@ -1789,8 +2031,7 @@ void DcompRenderer::Render(const MmdAnimator& animator)
 	m_cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
 	const bool enableFxaa = UsesFxaaMode(m_lightSettings.antiAliasingMode);
-	const bool ssaoActive = m_lightSettings.ssaoEnabled && (m_msaaSampleCount <= 1);
-	const bool toonDebugActive = m_lightSettings.toonDebugView != static_cast<int>(ToonDebugView::Final);
+	const bool ssaoActive = m_lightSettings.ssaoEnabled && m_ssaoTex;
 	float toneMapConsts[16] = {
 		1.0f / (float)m_width,
 		1.0f / (float)m_height,

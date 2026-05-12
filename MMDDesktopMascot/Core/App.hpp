@@ -23,7 +23,7 @@ class SettingsWindow;
 class App
 {
 public:
-	explicit App(HINSTANCE hInst);
+	explicit App(HINSTANCE hInst, bool useDirectComposition = true);
 	~App();
 
 	App(const App&) = delete;
@@ -114,9 +114,10 @@ private:
 	std::unique_ptr<MmdAnimator> m_animator;
 
 	InputManager m_input;
-	WindowManager m_windowManager;
 
 	AppSettings m_settingsData;
+	bool m_useDirectComposition{ true };
+	WindowManager m_windowManager;
 
 	std::filesystem::path m_baseDir;
 	std::filesystem::path m_modelsDir;

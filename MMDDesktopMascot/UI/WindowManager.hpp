@@ -28,7 +28,7 @@ public:
 	static constexpr UINT kLoadCompleteMessage = WM_APP + 200;
 	static constexpr UINT kLoadProgressMessage = WM_APP + 201;
 
-	WindowManager(HINSTANCE hInst, InputManager& input, AppSettings& settings, Callbacks callbacks);
+	WindowManager(HINSTANCE hInst, InputManager& input, AppSettings& settings, Callbacks callbacks, bool useDirectComposition = true);
 	~WindowManager();
 
 	WindowManager(const WindowManager&) = delete;
@@ -82,6 +82,7 @@ private:
 
 	void EnsureGizmoD2D();
 	void DiscardGizmoD2D();
+	void ResetGizmoLayeredSurface();
 
 	static LRESULT CALLBACK RenderClickThroughProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 	void ForceRenderTreeClickThroughFor(HWND hWnd);
@@ -116,6 +117,9 @@ private:
 	DcompRenderer* m_renderer{};
 
 	bool m_gizmoVisible{ false };
+	bool m_useDirectComposition{ true };
+
+	bool m_gizmoUseD2D{ true };
 
 	winrt::com_ptr<ID2D1Factory> m_d2dFactory;
 	winrt::com_ptr<ID2D1DCRenderTarget> m_gizmoRt;
@@ -128,4 +132,7 @@ private:
 	void* m_gizmoBits{ nullptr };
 
 	WNDPROC m_prevRenderWndProc = nullptr;
+
+	bool RenderGizmoD2D();
+	void RenderGizmoSoftware();
 };

@@ -9,6 +9,9 @@
 #include "TrayIcon.hpp"
 #include "Win32UiUtil.hpp"
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <format>
 #include <stdexcept>
 #include <windowsx.h>
@@ -24,10 +27,48 @@ namespace
 	constexpr wchar_t kGizmoClassName[] = L"MMDDesk.GizmoWindow";
 
 	constexpr int kGizmoSizePx = 140;
+	constexpr size_t kGizmoBitmapBytes = static_cast<size_t>(kGizmoSizePx) * static_cast<size_t>(kGizmoSizePx) * 4u;
 
-	DWORD GetWindowStyleExForRender()
+	void SanitizePremultipliedAlphaBuffer(void* bits)
 	{
-		return WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP;
+		if (!bits) return;
+
+		auto* pixels = static_cast<uint32_t*>(bits);
+		const size_t pixelCount = static_cast<size_t>(kGizmoSizePx) * static_cast<size_t>(kGizmoSizePx);
+		for (size_t i = 0; i < pixelCount; ++i)
+		{
+			uint32_t px = pixels[i];
+			uint32_t a = (px >> 24u) & 0xFFu;
+			uint32_t r = (px >> 16u) & 0xFFu;
+			uint32_t g = (px >> 8u) & 0xFFu;
+			uint32_t b = px & 0xFFu;
+			if (r == 0u && g == 0u && b == 0u)
+			{
+				pixels[i] = 0u;
+				continue;
+			}
+
+			const uint32_t maxRgb = (std::max)(r, (std::max)(g, b));
+			if (a == 0u)
+			{
+				a = maxRgb;
+			}
+
+			r = (std::min)(r, a);
+			g = (std::min)(g, a);
+			b = (std::min)(b, a);
+			pixels[i] = (a << 24u) | (r << 16u) | (g << 8u) | b;
+		}
+	}
+
+	DWORD GetWindowStyleExForRender(bool useDirectComposition)
+	{
+		DWORD ex = WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE;
+		if (useDirectComposition)
+		{
+			ex |= WS_EX_NOREDIRECTIONBITMAP;
+		}
+		return ex;
 	}
 
 	DWORD GetWindowStyleForRender()
@@ -168,11 +209,12 @@ namespace
 	}
 }
 
-WindowManager::WindowManager(HINSTANCE hInst, InputManager& input, AppSettings& settings, Callbacks callbacks)
+WindowManager::WindowManager(HINSTANCE hInst, InputManager& input, AppSettings& settings, Callbacks callbacks, bool useDirectComposition)
 	: m_hInst(hInst)
 	, m_input(input)
 	, m_settings(settings)
 	, m_callbacks(callbacks)
+	, m_useDirectComposition(useDirectComposition)
 {
 }
 
@@ -185,14 +227,20 @@ WindowManager::~WindowManager()
 
 	if (m_gizmoOldBmp && m_gizmoDc)
 	{
-		HGDIOBJ prev = SelectObject(m_gizmoDc, m_gizmoOldBmp);
-		if (prev != nullptr && prev != HGDI_ERROR)
-		{
-			DeleteObject(prev);
-		}
+		SelectObject(m_gizmoDc, m_gizmoOldBmp);
+		m_gizmoOldBmp = nullptr;
 	}
-	if (m_gizmoBmp) DeleteObject(m_gizmoBmp);
-	if (m_gizmoDc) DeleteDC(m_gizmoDc);
+	if (m_gizmoBmp)
+	{
+		DeleteObject(m_gizmoBmp);
+		m_gizmoBmp = nullptr;
+	}
+	m_gizmoBits = nullptr;
+	if (m_gizmoDc)
+	{
+		DeleteDC(m_gizmoDc);
+		m_gizmoDc = nullptr;
+	}
 }
 
 void WindowManager::Initialize()
@@ -271,12 +319,12 @@ void WindowManager::EnsureGizmoD2D()
 {
 	if (!m_gizmoWnd) return;
 
-	if (!m_d2dFactory)
+	if (!m_d2dFactory && m_gizmoUseD2D)
 	{
 		HRESULT hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, m_d2dFactory.put());
 		if (FAILED(hr))
 		{
-			throw std::runtime_error("D2D1CreateFactory failed.");
+			m_gizmoUseD2D = false;
 		}
 	}
 
@@ -293,24 +341,39 @@ void WindowManager::EnsureGizmoD2D()
 
 	if (!m_gizmoBmp)
 	{
-		BITMAPINFO bmi = {};
-		bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-		bmi.bmiHeader.biWidth = kGizmoSizePx;
-		bmi.bmiHeader.biHeight = -kGizmoSizePx;
-		bmi.bmiHeader.biPlanes = 1;
-		bmi.bmiHeader.biBitCount = 32;
-		bmi.bmiHeader.biCompression = BI_RGB;
+		BITMAPV5HEADER b5 = {};
+		b5.bV5Size = sizeof(BITMAPV5HEADER);
+		b5.bV5Width = kGizmoSizePx;
+		b5.bV5Height = -kGizmoSizePx;
+		b5.bV5Planes = 1;
+		b5.bV5BitCount = 32;
+		b5.bV5Compression = BI_BITFIELDS;
+		b5.bV5RedMask = 0x00FF0000;
+		b5.bV5GreenMask = 0x0000FF00;
+		b5.bV5BlueMask = 0x000000FF;
+		b5.bV5AlphaMask = 0xFF000000;
+		b5.bV5CSType = LCS_WINDOWS_COLOR_SPACE;
 
-		m_gizmoBmp = CreateDIBSection(m_gizmoDc, &bmi, DIB_RGB_COLORS, &m_gizmoBits, nullptr, 0);
+		m_gizmoBmp = CreateDIBSection(
+			m_gizmoDc,
+			reinterpret_cast<BITMAPINFO*>(&b5),
+			DIB_RGB_COLORS,
+			&m_gizmoBits,
+			nullptr,
+			0);
 		if (!m_gizmoBmp)
 		{
 			throw std::runtime_error("CreateDIBSection failed.");
 		}
 
 		m_gizmoOldBmp = SelectObject(m_gizmoDc, m_gizmoBmp);
+		if (m_gizmoBits)
+		{
+			std::memset(m_gizmoBits, 0, kGizmoBitmapBytes);
+		}
 	}
 
-	if (!m_gizmoRt)
+	if (!m_gizmoRt && m_gizmoUseD2D && m_d2dFactory)
 	{
 		D2D1_RENDER_TARGET_PROPERTIES props = D2D1::RenderTargetProperties(
 			D2D1_RENDER_TARGET_TYPE_SOFTWARE,
@@ -323,7 +386,8 @@ void WindowManager::EnsureGizmoD2D()
 		HRESULT hr = m_d2dFactory->CreateDCRenderTarget(&props, m_gizmoRt.put());
 		if (FAILED(hr))
 		{
-			throw std::runtime_error("CreateDCRenderTarget failed.");
+			m_gizmoUseD2D = false;
+			return;
 		}
 
 		m_gizmoRt->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
@@ -333,7 +397,8 @@ void WindowManager::EnsureGizmoD2D()
 			m_gizmoBrushFill.put());
 		if (FAILED(hr))
 		{
-			throw std::runtime_error("CreateSolidColorBrush (Fill) failed.");
+			m_gizmoUseD2D = false;
+			return;
 		}
 
 		hr = m_gizmoRt->CreateSolidColorBrush(
@@ -341,7 +406,8 @@ void WindowManager::EnsureGizmoD2D()
 			m_gizmoBrushStroke.put());
 		if (FAILED(hr))
 		{
-			throw std::runtime_error("CreateSolidColorBrush (Stroke) failed.");
+			m_gizmoUseD2D = false;
+			return;
 		}
 	}
 }
@@ -353,11 +419,26 @@ void WindowManager::DiscardGizmoD2D()
 	m_gizmoBrushStroke = nullptr;
 }
 
-void WindowManager::RenderGizmo()
+void WindowManager::ResetGizmoLayeredSurface()
 {
-	if (!m_gizmoVisible || !m_gizmoWnd) return;
-	EnsureGizmoD2D();
-	if (!m_gizmoRt || !m_gizmoDc) return;
+	DiscardGizmoD2D();
+
+	if (m_gizmoOldBmp && m_gizmoDc)
+	{
+		SelectObject(m_gizmoDc, m_gizmoOldBmp);
+		m_gizmoOldBmp = nullptr;
+	}
+	if (m_gizmoBmp)
+	{
+		DeleteObject(m_gizmoBmp);
+		m_gizmoBmp = nullptr;
+	}
+	m_gizmoBits = nullptr;
+}
+
+bool WindowManager::RenderGizmoD2D()
+{
+	if (!m_gizmoRt || !m_gizmoDc) return false;
 
 	const float width = static_cast<float>(kGizmoSizePx);
 	const float height = static_cast<float>(kGizmoSizePx);
@@ -370,8 +451,16 @@ void WindowManager::RenderGizmo()
 
 	if (FAILED(hr))
 	{
-		if (hr == D2DERR_RECREATE_TARGET) DiscardGizmoD2D();
-		return;
+		if (hr == D2DERR_RECREATE_TARGET)
+		{
+			ResetGizmoLayeredSurface();
+		}
+		return false;
+	}
+
+	if (m_gizmoBits)
+	{
+		std::memset(m_gizmoBits, 0, kGizmoBitmapBytes);
 	}
 
 	m_gizmoRt->BeginDraw();
@@ -390,14 +479,107 @@ void WindowManager::RenderGizmo()
 	{
 		if (hr == D2DERR_RECREATE_TARGET)
 		{
-			DiscardGizmoD2D();
+			ResetGizmoLayeredSurface();
 		}
 		else
 		{
 			OutputDebugStringW(std::format(L"EndDraw hr=0x{:08X}\n", static_cast<unsigned>(hr)).c_str());
 		}
-		return;
+		return false;
 	}
+
+	SanitizePremultipliedAlphaBuffer(m_gizmoBits);
+	return true;
+}
+
+void WindowManager::RenderGizmoSoftware()
+{
+	if (!m_gizmoDc || !m_gizmoBits || !m_gizmoWnd) return;
+
+	const int size = kGizmoSizePx;
+	const float cx = size * 0.5f;
+	const float cy = size * 0.5f;
+	const float radius = size * 0.5f - 2.0f;
+
+	auto* pixels = static_cast<uint32_t*>(m_gizmoBits);
+	std::memset(pixels, 0, kGizmoBitmapBytes);
+
+	const float tick = radius * 0.55f;
+
+	for (int y = 0; y < size; ++y)
+	{
+		for (int x = 0; x < size; ++x)
+		{
+			const float dx = static_cast<float>(x) - cx;
+			const float dy = static_cast<float>(y) - cy;
+			const float dist = std::sqrt(dx * dx + dy * dy);
+
+			const bool nearH = (std::abs(dy) < 1.25f) && (std::abs(dx) < tick);
+			const bool nearV = (std::abs(dx) < 1.25f) && (std::abs(dy) < tick);
+			if (nearH || nearV)
+			{
+				uint8_t a = static_cast<uint8_t>(0.9f * 255.0f);
+				uint8_t sv = static_cast<uint8_t>(0.85f * 255.0f);
+				pixels[y * size + x] = (static_cast<uint32_t>(a) << 24) | (static_cast<uint32_t>(sv) << 16) | (static_cast<uint32_t>(sv) << 8) | sv;
+				continue;
+			}
+
+			const float borderInner = radius - 2.5f;
+			const float borderOuter = radius + 0.5f;
+			if (dist >= borderInner && dist <= borderOuter)
+			{
+				float cover = (dist - borderInner) / (borderOuter - borderInner);
+				cover = (std::min)(cover, 1.0f);
+				uint8_t a = static_cast<uint8_t>(0.9f * 255.0f * cover);
+				uint8_t sv = static_cast<uint8_t>(0.85f * 255.0f * cover);
+				pixels[y * size + x] = (static_cast<uint32_t>(a) << 24) | (static_cast<uint32_t>(sv) << 16) | (static_cast<uint32_t>(sv) << 8) | sv;
+				continue;
+			}
+
+			if (dist < radius - 1.5f)
+			{
+				uint8_t a = static_cast<uint8_t>(0.6f * 255.0f);
+				uint8_t fv = static_cast<uint8_t>(0.08f * 255.0f);
+				pixels[y * size + x] = (static_cast<uint32_t>(a) << 24) | (static_cast<uint32_t>(fv) << 16) | (static_cast<uint32_t>(fv) << 8) | fv;
+			}
+		}
+	}
+}
+
+void WindowManager::RenderGizmo()
+{
+	if (!m_gizmoVisible || !m_gizmoWnd) return;
+
+	bool rendered = false;
+
+	if (m_gizmoUseD2D)
+	{
+		try
+		{
+			EnsureGizmoD2D();
+		}
+		catch (...)
+		{
+			m_gizmoUseD2D = false;
+		}
+
+		if (m_gizmoUseD2D && m_gizmoRt && m_gizmoDc)
+		{
+			rendered = RenderGizmoD2D();
+			if (!rendered)
+			{
+				m_gizmoUseD2D = false;
+			}
+		}
+	}
+
+	if (!rendered)
+	{
+		EnsureGizmoD2D();
+		RenderGizmoSoftware();
+	}
+
+	if (!m_gizmoDc) return;
 
 	BLENDFUNCTION bf = {};
 	bf.BlendOp = AC_SRC_OVER;
@@ -411,7 +593,24 @@ void WindowManager::RenderGizmo()
 	GetWindowRect(m_gizmoWnd, &wndRect);
 	POINT ptDst = { wndRect.left, wndRect.top };
 
-	UpdateLayeredWindow(m_gizmoWnd, nullptr, &ptDst, &wndSize, m_gizmoDc, &ptSrc, 0, &bf, ULW_ALPHA);
+	if (!UpdateLayeredWindow(m_gizmoWnd, nullptr, &ptDst, &wndSize, m_gizmoDc, &ptSrc, 0, &bf, ULW_ALPHA))
+	{
+		const DWORD gle = GetLastError();
+		OutputDebugStringW(std::format(L"UpdateLayeredWindow failed. gle={}\n", gle).c_str());
+
+		ResetGizmoLayeredSurface();
+		LONG_PTR ex = GetWindowLongPtrW(m_gizmoWnd, GWL_EXSTYLE);
+		SetWindowLongPtrW(m_gizmoWnd, GWL_EXSTYLE, ex & ~static_cast<LONG_PTR>(WS_EX_LAYERED));
+		SetWindowLongPtrW(m_gizmoWnd, GWL_EXSTYLE, ex | static_cast<LONG_PTR>(WS_EX_LAYERED));
+		SetWindowPos(
+			m_gizmoWnd,
+			nullptr,
+			0,
+			0,
+			0,
+			0,
+			SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+	}
 }
 
 void WindowManager::InstallRenderClickThrough()
@@ -472,16 +671,16 @@ void WindowManager::ApplyWindowManipulationMode(bool enabled)
 {
 	if (!m_renderWnd) return;
 
-	const SIZE clientSize = Win32UiUtil::GetClientSize(m_renderWnd);
-	POINT clientOrigin{ 0, 0 };
-	ClientToScreen(m_renderWnd, &clientOrigin);
-
 	SetWindowManipulationModeProp(m_renderWnd, enabled);
 
 	if (m_renderer)
 	{
 		m_renderer->SetResizeOverlayEnabled(enabled);
 	}
+
+	const SIZE clientSize = Win32UiUtil::GetClientSize(m_renderWnd);
+	POINT clientOrigin{ 0, 0 };
+	ClientToScreen(m_renderWnd, &clientOrigin);
 
 	SetRenderTreeInteractivity(enabled);
 
@@ -539,9 +738,10 @@ void WindowManager::SetGizmoVisible(bool visible)
 		return;
 	}
 
+	ResetGizmoLayeredSurface();
 	PositionGizmoWindow();
 	ShowWindow(m_gizmoWnd, SW_SHOWNOACTIVATE);
-	InvalidateRect(m_gizmoWnd, nullptr, FALSE);
+	RenderGizmo();
 }
 
 void WindowManager::SetRenderTreeInteractivity(bool interactive) const
@@ -744,7 +944,7 @@ void WindowManager::CreateRenderWindow()
 	const RECT bounds = ComputeInitialRenderBounds(workArea, m_settings);
 
 	m_renderWnd = CreateWindowExW(
-		GetWindowStyleExForRender(),
+		GetWindowStyleExForRender(m_useDirectComposition),
 		kRenderClassName, L"MMDDesk",
 		GetWindowStyleForRender(),
 		bounds.left,
@@ -836,6 +1036,46 @@ LRESULT CALLBACK WindowManager::RenderClickThroughProc(HWND hWnd, UINT msg, WPAR
 
 			return HTCAPTION;
 		}
+		case WM_NCCALCSIZE:
+		{
+			if (wParam == TRUE)
+			{
+				auto* params = reinterpret_cast<NCCALCSIZE_PARAMS*>(lParam);
+				RECT windowRect = params->rgrc[0];
+
+				LRESULT ret = DefWindowProcW(hWnd, msg, wParam, lParam);
+
+				if (::IsWindowManipulationMode(hWnd))
+				{
+					UINT dpi = GetDpiForWindow(hWnd);
+					const int paddedBorder = (dpi > 0)
+						? GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi)
+						: GetSystemMetrics(SM_CXPADDEDBORDER);
+					const int frameX = std::max(
+						8,
+						((dpi > 0)
+							? GetSystemMetricsForDpi(SM_CXSIZEFRAME, dpi)
+							: GetSystemMetrics(SM_CXSIZEFRAME)) + paddedBorder);
+					const int frameY = std::max(
+						8,
+						((dpi > 0)
+							? GetSystemMetricsForDpi(SM_CYSIZEFRAME, dpi)
+							: GetSystemMetrics(SM_CYSIZEFRAME)) + paddedBorder);
+					const int border = std::max(frameX, frameY);
+
+					params->rgrc[0].left = windowRect.left + border;
+					params->rgrc[0].top = windowRect.top + border;
+					params->rgrc[0].right = windowRect.right - border;
+					params->rgrc[0].bottom = windowRect.bottom - border;
+
+					return ret | WVR_REDRAW;
+				}
+
+				return ret;
+			}
+			break;
+		}
+
 		case WM_MOUSEACTIVATE:
 			return ::IsWindowManipulationMode(hWnd) ? MA_ACTIVATE : MA_NOACTIVATE;
 		default:

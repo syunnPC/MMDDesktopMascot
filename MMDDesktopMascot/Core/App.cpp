@@ -197,9 +197,10 @@ namespace
 	}
 }
 
-App::App(HINSTANCE hInst)
+App::App(HINSTANCE hInst, bool useDirectComposition)
 	: m_hInst(hInst)
 	, m_input(*this)
+	, m_useDirectComposition(useDirectComposition)
 	, m_windowManager(
 		hInst,
 		m_input,
@@ -210,7 +211,8 @@ App::App(HINSTANCE hInst)
 			[this](WPARAM wParam, LPARAM lParam) { OnLoadProgress(wParam, lParam); },
 			[this](WPARAM wParam, LPARAM lParam) { OnLoadComplete(wParam, lParam); },
 			[this]() { SaveSettings(); }
-		})
+		},
+		useDirectComposition)
 {
 	Gdiplus::GdiplusStartupInput gdiplusStartupInput;
 	if (Gdiplus::GdiplusStartup(&m_gdiplusToken, &gdiplusStartupInput, nullptr) == Gdiplus::Ok)
@@ -594,7 +596,7 @@ void App::Render()
 	if (m_windowManager.IsGizmoVisible() && m_windowManager.GizmoWindow())
 	{
 		m_windowManager.PositionGizmoWindow();
-		InvalidateRect(m_windowManager.GizmoWindow(), nullptr, FALSE);
+		m_windowManager.RenderGizmo();
 	}
 }
 
@@ -687,7 +689,7 @@ void App::InitRenderer()
 	m_renderer = std::make_unique<DcompRenderer>();
 	try
 	{
-		m_renderer->Initialize(m_windowManager.RenderWindow(), onProgress);
+		m_renderer->Initialize(m_windowManager.RenderWindow(), m_useDirectComposition, onProgress);
 	}
 	catch (const std::exception& e)
 	{
@@ -698,6 +700,11 @@ void App::InitRenderer()
 	m_windowManager.SetRenderer(m_renderer.get());
 	m_windowManager.InstallRenderClickThrough();
 	m_windowManager.ForceRenderTreeClickThrough();
+	m_renderer->SetRenderResolutionSettings(
+		m_settingsData.renderResolutionMode,
+		m_settingsData.renderScalePercent,
+		m_settingsData.renderCustomWidth,
+		m_settingsData.renderCustomHeight);
 
 	// 保存されたライト設定を適用
 	m_renderer->SetLightSettings(m_settingsData.light);
@@ -1112,6 +1119,11 @@ void App::ApplySettings(const AppSettings& settings, bool persist)
 		(m_settingsData.lookAtEnabled != nextSettings.lookAtEnabled) ||
 		(m_settingsData.autoBlinkEnabled != nextSettings.autoBlinkEnabled) ||
 		(m_settingsData.breathingEnabled != nextSettings.breathingEnabled);
+	const bool renderResolutionChanged =
+		(m_settingsData.renderResolutionMode != nextSettings.renderResolutionMode) ||
+		(m_settingsData.renderScalePercent != nextSettings.renderScalePercent) ||
+		(m_settingsData.renderCustomWidth != nextSettings.renderCustomWidth) ||
+		(m_settingsData.renderCustomHeight != nextSettings.renderCustomHeight);
 
 	m_settingsData = nextSettings;
 
@@ -1128,6 +1140,14 @@ void App::ApplySettings(const AppSettings& settings, bool persist)
 	if (fpsChanged)
 	{
 		ApplyPresentationSettings();
+	}
+	if (renderResolutionChanged && m_renderer)
+	{
+		m_renderer->SetRenderResolutionSettings(
+			m_settingsData.renderResolutionMode,
+			m_settingsData.renderScalePercent,
+			m_settingsData.renderCustomWidth,
+			m_settingsData.renderCustomHeight);
 	}
 
 	ApplyLightSettings();

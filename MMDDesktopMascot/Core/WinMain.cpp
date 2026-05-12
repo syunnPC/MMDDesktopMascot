@@ -331,7 +331,10 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _I
 			return RunPhysicsDiagnostic(diagnosticOptions);
 		}
 
-		Win32UiUtil::RequireWindows11();
+		const bool bypassVersionCheck = HasCommandLineOption(args, L"--bypass-version-check");
+		const bool useDirectComposition = !HasCommandLineOption(args, L"--no-dcomp");
+
+		Win32UiUtil::RequireWindows11(bypassVersionCheck);
 
 #ifdef __AVX2__
 		if (!IsProcessorFeaturePresent(PF_AVX2_INSTRUCTIONS_AVAILABLE))
@@ -358,7 +361,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _I
 			throw std::runtime_error("Failed to initialize COM.");
 		}
 
-		App app{ hInstance };
+		App app{ hInstance, useDirectComposition };
 		return app.Run();
 	}
 	catch (const std::exception& exception)
