@@ -19,8 +19,6 @@
 #include <objbase.h>
 #include <shellapi.h>
 
-#define PROFILER_ATTACHED
-
 namespace
 {
 	struct PhysicsDiagnosticOptions
@@ -343,13 +341,13 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _I
 		}
 #endif
 
-		Win32UiUtil::EnablePerMonitorDpiAwareness();
-		Win32UiUtil::InitializeDarkModeSupport();
-
 		if (!IsDebuggerPresent() && !HasCommandLineOption(args, L"--no-restart"))
 		{
 			RelaunchWithOpenMpPassiveIfNeeded();
 		}
+
+		Win32UiUtil::EnablePerMonitorDpiAwareness();
+		Win32UiUtil::InitializeDarkModeSupport();
 
 		// This process is animation/rendering heavy. Background throttling hurts frame pacing
 		// noticeably on hybrid/mobile CPUs, so keep the default scheduler policy.
