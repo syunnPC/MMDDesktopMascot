@@ -74,6 +74,10 @@ public:
 	{
 		return m_ssaoPso.get();
 	}
+	ID3D12PipelineState* GetSsaoMsaaPso() const
+	{
+		return m_ssaoMsaaPso.get();
+	}
 	ID3D12PipelineState* GetBloomDownsamplePso() const
 	{
 		return m_bloomDownPso.get();
@@ -120,6 +124,7 @@ private:
 
 	winrt::com_ptr<ID3D12RootSignature> m_postProcessRootSig;
 	winrt::com_ptr<ID3D12PipelineState> m_ssaoPso;
+	winrt::com_ptr<ID3D12PipelineState> m_ssaoMsaaPso;
 	winrt::com_ptr<ID3D12PipelineState> m_bloomDownPso;
 	winrt::com_ptr<ID3D12PipelineState> m_bloomBlurPso;
 	winrt::com_ptr<ID3D12PipelineState> m_toonCompositePso;

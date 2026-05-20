@@ -54,7 +54,7 @@ float Luma(float3 c)
 float DepthAt(float2 uv)
 {
     float hardwareDepth = g_depthTex.SampleLevel(g_pointClamp, uv, 0);
-    float proxyDepth = g_auxOutlineTex.SampleLevel(g_pointClamp, uv, 0).a;
+    float proxyDepth = 1.0 - g_auxOutlineTex.SampleLevel(g_pointClamp, uv, 0).a;
     return lerp(proxyDepth, hardwareDepth, step(0.5, g_useDepthTexture));
 }
 

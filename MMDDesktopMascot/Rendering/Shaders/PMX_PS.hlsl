@@ -290,6 +290,25 @@ float ScreenStableNoise(float2 pixel)
     return frac(52.9829189 * frac(0.06711056 * p.x + 0.00583715 * p.y));
 }
 
+static const float2 g_shadowPoisson[16] = {
+    float2(-0.326, -0.406),
+    float2(-0.840, -0.074),
+    float2(-0.696,  0.457),
+    float2(-0.203,  0.621),
+    float2( 0.962, -0.195),
+    float2( 0.473, -0.480),
+    float2( 0.519,  0.767),
+    float2( 0.185, -0.893),
+    float2( 0.507,  0.064),
+    float2( 0.896,  0.412),
+    float2(-0.322, -0.933),
+    float2(-0.792, -0.598),
+    float2( 0.125,  0.298),
+    float2(-0.114,  0.176),
+    float2( 0.302, -0.251),
+    float2(-0.188, -0.214)
+};
+
 float SampleSelfShadow(float3 worldPos, float3 normal, float3 lightDir)
 {
     if (g_enableSelfShadow == 0)
@@ -312,24 +331,35 @@ float SampleSelfShadow(float3 worldPos, float3 normal, float3 lightDir)
     }
 
     float ndotl = saturate(dot(normal, lightDir));
-    float depthBias = g_shadowBias * lerp(2.2, 0.8, ndotl);
+    float depthBias = g_shadowBias * lerp(3.9, 1.2, ndotl);
+    float receiverSoftness = saturate(1.0 - ndotl);
     float2 texel = float2(g_shadowMapInvSize, g_shadowMapInvSize);
+    float filterRadius = g_shadowMapInvSize * lerp(3.2, 7.0, receiverSoftness);
 
     float visibility = 0.0;
+    float totalWeight = 0.0;
     [unroll]
-    for (int y = -1; y <= 1; ++y)
+    for (int tap = 0; tap < 16; ++tap)
     {
-        [unroll]
-        for (int x = -1; x <= 1; ++x)
-        {
-            visibility += g_shadowMap.SampleCmpLevelZero(
-                g_shadowSamp,
-                shadowUv + float2(x, y) * texel,
-                shadowDepth - depthBias);
-        }
+        float2 offset = g_shadowPoisson[tap];
+        float distanceWeight = saturate(1.0 - dot(offset, offset) * 0.48);
+        float2 uvOffset = offset * filterRadius;
+        float sample = g_shadowMap.SampleCmpLevelZero(
+            g_shadowSamp,
+            shadowUv + uvOffset,
+            shadowDepth - depthBias);
+        visibility += sample * distanceWeight;
+        totalWeight += distanceWeight;
     }
 
-    return visibility / 9.0;
+    float center = g_shadowMap.SampleCmpLevelZero(
+        g_shadowSamp,
+        shadowUv,
+        shadowDepth - depthBias * 0.85);
+    visibility += center * 0.95;
+    totalWeight += 0.95;
+
+    return visibility / max(totalWeight, 1.0e-4);
 }
 
 float StylizeSelfShadow(float visibility, float2 pixel)
@@ -340,8 +370,8 @@ float StylizeSelfShadow(float visibility, float2 pixel)
     }
 
     float threshold = saturate(0.5 + g_shadowRampShift * 0.18);
-    float softness = max(0.02, g_toonShadowSoftness * 1.6);
-    float jitter = (ScreenStableNoise(pixel) - 0.5) * softness * 0.5;
+    float softness = max(0.06, g_toonShadowSoftness * 2.9);
+    float jitter = (ScreenStableNoise(pixel) - 0.5) * softness * 0.12;
     return smoothstep(
         threshold - softness + jitter,
         threshold + softness + jitter,
@@ -562,7 +592,7 @@ PSOut PSMain(PSIn i)
 
     o.auxNormal = float4(normalize(N) * 0.5 + 0.5, float(materialType) / 255.0);
     o.auxToon = float4(ndotl01, specMask, saturate(rimMask), 1.0 - toonLit);
-    o.auxOutline = float4(outlineWidthNorm, saturate(g_materialIdNormalized), edgeEnabled, saturate(i.pos.z));
+    o.auxOutline = float4(outlineWidthNorm, saturate(g_materialIdNormalized), edgeEnabled, saturate(1.0f - i.pos.z));
     o.auxEdgeColor = saturate(g_edgeColor);
 
     return o;

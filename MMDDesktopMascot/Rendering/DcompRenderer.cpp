@@ -26,7 +26,7 @@ namespace
 	constexpr DXGI_FORMAT kSceneRenderTargetFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
 	constexpr DXGI_FORMAT kAuxNormalRenderTargetFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
 	constexpr DXGI_FORMAT kAuxToonRenderTargetFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-	constexpr DXGI_FORMAT kAuxOutlineRenderTargetFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+	constexpr DXGI_FORMAT kAuxOutlineRenderTargetFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
 	constexpr DXGI_FORMAT kAuxEdgeColorRenderTargetFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 	constexpr DXGI_FORMAT kSmaaWeightsFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 
@@ -435,7 +435,7 @@ void DcompRenderer::CreateToonAuxiliaryResources()
 
 	const float normalClear[4] = { 0.5f, 0.5f, 1.0f, 0.0f };
 	const float toonClear[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
-	const float outlineClear[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+	const float outlineClear[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 	const float edgeColorClear[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 	const float sceneClear[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 	const float smaaClear[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
@@ -599,6 +599,17 @@ void DcompRenderer::CreatePostProcessResources()
 		auto srvHandle = m_postProcessHeap->GetCPUDescriptorHandleForHeapStart();
 		srvHandle.ptr += (SIZE_T)PP_DepthSrv * m_postProcessDescriptorSize;
 		m_ctx.Device()->CreateShaderResourceView(m_auxOutlineTex.get(), &srvDesc, srvHandle);
+	}
+
+	if (m_depth && m_msaaSampleCount > 1)
+	{
+		D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+		srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+		srvDesc.Format = DXGI_FORMAT_R32_FLOAT;
+		srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DMS;
+		auto srvHandle = m_postProcessHeap->GetCPUDescriptorHandleForHeapStart();
+		srvHandle.ptr += (SIZE_T)PP_MsaaDepthSrv * m_postProcessDescriptorSize;
+		m_ctx.Device()->CreateShaderResourceView(m_depth.get(), &srvDesc, srvHandle);
 	}
 
 	auto createTextureSrv = [&](ID3D12Resource* resource, DXGI_FORMAT format, PostProcessDescriptorIndex index) {
@@ -1237,7 +1248,7 @@ void DcompRenderer::Render(const MmdAnimator& animator)
 	m_cmdList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
 	const float normalClear[4] = { 0.5f, 0.5f, 1.0f, 0.0f };
 	const float toonClear[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
-	const float outlineClear[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+	const float outlineClear[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 	const float edgeColorClear[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 	m_cmdList->ClearRenderTargetView(sceneRtvs[1], normalClear, 0, nullptr);
 	m_cmdList->ClearRenderTargetView(sceneRtvs[2], toonClear, 0, nullptr);
@@ -1696,11 +1707,11 @@ void DcompRenderer::Render(const MmdAnimator& animator)
 			m_auxToonState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 		}
 
-		if (m_auxOutlineState != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
+		if (m_auxOutlineState != targetState)
 		{
 			barriers[barrierCount++] = CD3DX12_RESOURCE_BARRIER::Transition(
-				m_auxOutlineTex.get(), m_auxOutlineState, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-			m_auxOutlineState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+				m_auxOutlineTex.get(), m_auxOutlineState, targetState);
+			m_auxOutlineState = targetState;
 		}
 
 		if (m_auxEdgeColorState != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
@@ -1895,8 +1906,9 @@ void DcompRenderer::Render(const MmdAnimator& animator)
 	// SSAO. MSAA uses the resolved PMX proxy depth stored in aux outline alpha.
 	if (m_lightSettings.ssaoEnabled && m_ssaoTex && m_postProcessHeap)
 	{
+		const bool useMsaaDepth = m_msaaSampleCount > 1;
 		m_cmdList->SetComputeRootSignature(m_pipeline.GetPostProcessRootSignature());
-		m_cmdList->SetPipelineState(m_pipeline.GetSsaoPso());
+		m_cmdList->SetPipelineState(useMsaaDepth ? m_pipeline.GetSsaoMsaaPso() : m_pipeline.GetSsaoPso());
 		XMMATRIX proj = frameTransform.proj;
 		XMMATRIX invProj = XMMatrixInverse(nullptr, proj);
 		XMFLOAT4X4 invProjStore;
@@ -1916,6 +1928,10 @@ void DcompRenderer::Render(const MmdAnimator& animator)
 		ssaoConsts[23] = 0.0f;
 		m_cmdList->SetComputeRoot32BitConstants(0, 24, ssaoConsts, 0);
 		m_cmdList->SetComputeRootDescriptorTable(1, GetPostProcessGpuHandle(PP_DepthSrv));
+		if (useMsaaDepth)
+		{
+			m_cmdList->SetComputeRootDescriptorTable(10, GetPostProcessGpuHandle(PP_MsaaDepthSrv));
+		}
 		m_cmdList->SetComputeRootDescriptorTable(5, GetPostProcessGpuHandle(PP_SsaoUav));
 		m_cmdList->Dispatch((m_width + 7) / 8, (m_height + 7) / 8, 1);
 	}
@@ -2097,9 +2113,8 @@ void DcompRenderer::CreateDepthBuffer()
 
 	auto heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
 
-	// Use D32_FLOAT for MSAA (original, stable path).
-	// Use R32_TYPELESS for non-MSAA so we can create an R32_FLOAT SRV for SSAO.
-	DXGI_FORMAT depthFormat = (m_msaaSampleCount > 1) ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_R32_TYPELESS;
+	// Keep the resource typeless so both DSV and SRV can be created for single-sample and MSAA paths.
+	DXGI_FORMAT depthFormat = DXGI_FORMAT_R32_TYPELESS;
 
 	auto desc = CD3DX12_RESOURCE_DESC::Tex2D(
 		depthFormat,

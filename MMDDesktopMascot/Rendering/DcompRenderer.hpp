@@ -270,6 +270,7 @@ private:
         PP_SmaaEdgesSrv,
         PP_SmaaBlendSrv,
         PP_SmaaOutputSrv,
+        PP_MsaaDepthSrv,
         PP_DescriptorCount
     };
 

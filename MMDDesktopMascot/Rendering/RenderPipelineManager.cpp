@@ -27,7 +27,7 @@ namespace
 	constexpr DXGI_FORMAT kPresentRenderTargetFormat = DXGI_FORMAT_B8G8R8A8_UNORM;
 	constexpr DXGI_FORMAT kAuxNormalRenderTargetFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
 	constexpr DXGI_FORMAT kAuxToonRenderTargetFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-	constexpr DXGI_FORMAT kAuxOutlineRenderTargetFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+	constexpr DXGI_FORMAT kAuxOutlineRenderTargetFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
 	constexpr DXGI_FORMAT kAuxEdgeColorRenderTargetFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 	constexpr DXGI_FORMAT kSmaaWeightsFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 	const D3D12_INPUT_ELEMENT_DESC kPmxInputLayout[] = {
@@ -687,7 +687,7 @@ void RenderPipelineManager::CreateShadowPipeline()
 
 void RenderPipelineManager::CreatePostProcessRootSignature()
 {
-	CD3DX12_ROOT_PARAMETER params[10]{};
+	CD3DX12_ROOT_PARAMETER params[11]{};
 
 	params[0].InitAsConstants(28, 0);
 
@@ -726,6 +726,10 @@ void RenderPipelineManager::CreatePostProcessRootSignature()
 	CD3DX12_DESCRIPTOR_RANGE auxEdgeColorSrvRange{};
 	auxEdgeColorSrvRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 7);
 	params[9].InitAsDescriptorTable(1, &auxEdgeColorSrvRange, D3D12_SHADER_VISIBILITY_ALL);
+
+	CD3DX12_DESCRIPTOR_RANGE msaaDepthSrvRange{};
+	msaaDepthSrvRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 8);
+	params[10].InitAsDescriptorTable(1, &msaaDepthSrvRange, D3D12_SHADER_VISIBILITY_ALL);
 
 	D3D12_STATIC_SAMPLER_DESC samplers[2]{};
 	samplers[0].Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
@@ -767,6 +771,20 @@ void RenderPipelineManager::CreateSsaoPipeline()
 	pso.CS = { csBlob->GetBufferPointer(), csBlob->GetBufferSize() };
 
 	DX_CALL(m_ctx->Device()->CreateComputePipelineState(&pso, IID_PPV_ARGS(m_ssaoPso.put())));
+
+	const auto msaaCsBlob = LoadOrCompileShader(
+		L"SSAO_MSAA_CS.hlsl",
+		L"Compiled_SSAO_MSAA_CS.cso",
+		"MainCS",
+		"cs_5_0",
+		D3DCOMPILE_OPTIMIZATION_LEVEL3,
+		"D3DCompile SSAO MSAA CS");
+
+	D3D12_COMPUTE_PIPELINE_STATE_DESC msaaPso{};
+	msaaPso.pRootSignature = m_postProcessRootSig.get();
+	msaaPso.CS = { msaaCsBlob->GetBufferPointer(), msaaCsBlob->GetBufferSize() };
+
+	DX_CALL(m_ctx->Device()->CreateComputePipelineState(&msaaPso, IID_PPV_ARGS(m_ssaoMsaaPso.put())));
 }
 
 void RenderPipelineManager::CreateBloomPipeline()

@@ -1,9 +1,8 @@
-// SSAO_CS.hlsl
-// Full-resolution screen-space ambient occlusion from scene depth.
+// SSAO_MSAA_CS.hlsl
+// Full-resolution SSAO from MSAA hardware depth.
 
-Texture2D<float4> g_sceneDepth : register(t0);
+Texture2DMS<float> g_sceneDepthMsaa : register(t8);
 RWTexture2D<float> g_outAO : register(u0);
-SamplerState g_pointClamp : register(s1);
 
 cbuffer SSAOCB : register(b0)
 {
@@ -38,11 +37,22 @@ static const float2 g_sampleOffsets[NUM_SAMPLES] = {
     float2(-0.7631,  0.5299)
 };
 
-float ReadDepth(float2 uv)
+float ReadDepthAtPixel(int2 pixel, int2 size)
 {
-    float4 d = g_sceneDepth.SampleLevel(g_pointClamp, saturate(uv), 0);
-    float proxyDepth = 1.0f - d.a;
-    return lerp(d.r, proxyDepth, step(0.5f, g_useProxyDepth));
+    pixel = clamp(pixel, int2(0, 0), size - 1);
+
+    uint width;
+    uint height;
+    uint sampleCount;
+    g_sceneDepthMsaa.GetDimensions(width, height, sampleCount);
+
+    float depth = 0.0f;
+    [loop]
+    for (uint sample = 0; sample < sampleCount; ++sample)
+    {
+        depth += g_sceneDepthMsaa.Load(pixel, sample);
+    }
+    return depth / max((float)sampleCount, 1.0f);
 }
 
 bool IsValidDepth(float depth)
@@ -59,19 +69,24 @@ float3 ViewSpacePositionFromDepth(float2 uv, float rawDepth)
     return viewPos.xyz;
 }
 
-float3 SafeViewSpacePosition(float2 uv, float3 fallbackPos)
+float3 SafeViewSpacePosition(int2 pixel, int2 size, float3 fallbackPos)
 {
-    float depth = ReadDepth(uv);
-    return IsValidDepth(depth) ? ViewSpacePositionFromDepth(uv, depth) : fallbackPos;
+    float depth = ReadDepthAtPixel(pixel, size);
+    if (!IsValidDepth(depth))
+    {
+        return fallbackPos;
+    }
+
+    float2 uv = (float2(pixel) + 0.5f) / float2(size);
+    return ViewSpacePositionFromDepth(uv, depth);
 }
 
-float3 ReconstructNormalFromDepth(float2 uv, float3 centerPos)
+float3 ReconstructNormalFromDepth(int2 pixel, int2 size, float3 centerPos)
 {
-    float2 texel = g_invScreenSize;
-    float3 left = SafeViewSpacePosition(uv - float2(texel.x, 0.0f), centerPos);
-    float3 right = SafeViewSpacePosition(uv + float2(texel.x, 0.0f), centerPos);
-    float3 up = SafeViewSpacePosition(uv - float2(0.0f, texel.y), centerPos);
-    float3 down = SafeViewSpacePosition(uv + float2(0.0f, texel.y), centerPos);
+    float3 left = SafeViewSpacePosition(pixel + int2(-1, 0), size, centerPos);
+    float3 right = SafeViewSpacePosition(pixel + int2(1, 0), size, centerPos);
+    float3 up = SafeViewSpacePosition(pixel + int2(0, -1), size, centerPos);
+    float3 down = SafeViewSpacePosition(pixel + int2(0, 1), size, centerPos);
 
     float3 dx = (abs(right.z - centerPos.z) < abs(centerPos.z - left.z))
         ? (right - centerPos)
@@ -114,11 +129,15 @@ void MainCS(uint2 tid : SV_DispatchThreadID)
     uint2 outputSize;
     g_outAO.GetDimensions(outputSize.x, outputSize.y);
     if (any(tid >= outputSize))
+    {
         return;
+    }
 
+    int2 pixel = int2(tid);
+    int2 size = int2(outputSize);
     float2 uv = (float2(tid) + 0.5f) / float2(outputSize);
 
-    float depth = ReadDepth(uv);
+    float depth = ReadDepthAtPixel(pixel, size);
     if (!IsValidDepth(depth))
     {
         g_outAO[tid] = 1.0f;
@@ -126,7 +145,7 @@ void MainCS(uint2 tid : SV_DispatchThreadID)
     }
 
     float3 centerPos = ViewSpacePositionFromDepth(uv, depth);
-    float3 centerNormal = ReconstructNormalFromDepth(uv, centerPos);
+    float3 centerNormal = ReconstructNormalFromDepth(pixel, size, centerPos);
     float viewZ = max(centerPos.z, 0.05f);
     float radius = max(g_radius, 1.0e-4f);
     float radiusSq = radius * radius;
@@ -146,14 +165,17 @@ void MainCS(uint2 tid : SV_DispatchThreadID)
     {
         float sampleScale = (float(i) + 1.0f) / float(NUM_SAMPLES);
         sampleScale = lerp(0.18f, 1.0f, sampleScale * sampleScale);
-        float2 sampleUV = uv + Rotate(g_sampleOffsets[i], rotation) * radiusUv * sampleScale;
-        float sampleDepth = ReadDepth(sampleUV);
+        float2 sampleUv = uv + Rotate(g_sampleOffsets[i], rotation) * radiusUv * sampleScale;
+        int2 samplePixel = int2(sampleUv * float2(outputSize));
+        float sampleDepth = ReadDepthAtPixel(samplePixel, size);
         if (!IsValidDepth(sampleDepth))
         {
             continue;
         }
 
-        float3 samplePos = ViewSpacePositionFromDepth(sampleUV, sampleDepth);
+        samplePixel = clamp(samplePixel, int2(0, 0), size - 1);
+        float2 sampleUvCenter = (float2(samplePixel) + 0.5f) / float2(size);
+        float3 samplePos = ViewSpacePositionFromDepth(sampleUvCenter, sampleDepth);
         float3 v = samplePos - centerPos;
         float distSq = dot(v, v);
         if (distSq <= 1.0e-8f || distSq >= radiusSq)
