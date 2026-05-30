@@ -133,6 +133,8 @@ private:
 	// Toon Control
 	HWND m_toonEnableCheck{};
 	HWND m_selfShadowCheck{};
+	HWND m_selfShadowSmoothingSlider{};
+	HWND m_selfShadowSmoothingLabel{};
 	HWND m_ssaoCheck{};
 	HWND m_ssaoIntensitySlider{};
 	HWND m_ssaoIntensityLabel{};

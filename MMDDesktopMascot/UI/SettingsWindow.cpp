@@ -75,6 +75,7 @@ namespace
 	constexpr int ID_RIM_INTENSITY_SLIDER = 145;
 	constexpr int ID_SPECULAR_STEP_SLIDER = 146;
 	constexpr int ID_SHADOW_RAMP_SLIDER = 147;
+	constexpr int ID_SELF_SHADOW_SMOOTHING_SLIDER = 151;
 	constexpr int ID_AA_MODE_COMBO = 154;
 	constexpr int ID_SELF_SHADOW_ENABLE = 155;
 	constexpr int ID_MSAA_SAMPLES_COMBO = 156;
@@ -1158,6 +1159,13 @@ void SettingsWindow::CreateControls()
 	AddTooltip(m_selfShadowCheck, L"主光源方向の自己影を使います。前髪や衣装の落ち影が強く出ます。");
 	y += rowH;
 
+	CreateLabel(L"自己影の平滑化:", xPadding, y, labelW);
+	m_selfShadowSmoothingSlider = CreateSlider(ID_SELF_SHADOW_SMOOTHING_SLIDER, xPadding + labelW, y, sliderW);
+	SendMessageW(m_selfShadowSmoothingSlider, TBM_SETRANGE, TRUE, MAKELONG(0, 100));
+	m_selfShadowSmoothingLabel = CreateLabel(L"0.35", xPadding + labelW + sliderW + 10, y, 50);
+	AddTooltip(m_selfShadowSmoothingSlider, L"自己影のサンプル範囲とトゥーン影境界を広げ、細かい影の線を抑えます。0で従来寄り、1でより滑らかです。");
+	y += rowH;
+
 	m_ssaoCheck = CreateCheck(ID_SSAO_ENABLE, L"SSAO を有効", xPadding, y, 180);
 	AddTooltip(m_ssaoCheck, L"画面上の深度から接地部や凹部に薄い環境遮蔽を加えます。");
 	y += rowH;
@@ -1361,15 +1369,19 @@ void SettingsWindow::CreateControls()
 	y += 8;
 	Reg(CreateSubSectionHeader(L"── エフェクト ──", xPadding, y, sectionW));
 	y += 24;
-	Reg(CreateLabel(L"リム幅/強度:", xPadding, y, labelW));
-	m_rimWidthSlider = CreateSlider(ID_RIM_WIDTH_SLIDER, xPadding + labelW, y, sliderW / 2 - 5);
+	Reg(CreateLabel(L"リム:", xPadding, y, labelW));
+	Reg(CreateLabel(L"幅:", xPadding + labelW, y, 44));
+	m_rimWidthSlider = CreateSlider(ID_RIM_WIDTH_SLIDER, xPadding + labelW + 48, y, sliderW - 48);
 	SendMessageW(m_rimWidthSlider, TBM_SETRANGE, TRUE, MAKELONG(10, 100));
-	m_rimIntensitySlider = CreateSlider(ID_RIM_INTENSITY_SLIDER, xPadding + labelW + sliderW / 2 + 5, y, sliderW / 2 - 5);
-	SendMessageW(m_rimIntensitySlider, TBM_SETRANGE, TRUE, MAKELONG(0, 100));
 	m_rimWidthLabel = CreateLabel(L"", xPadding + labelW + sliderW + 10, y, 50);
 	y += rowH;
+	Reg(CreateLabel(L"強度:", xPadding + labelW, y, 44));
+	m_rimIntensitySlider = CreateSlider(ID_RIM_INTENSITY_SLIDER, xPadding + labelW + 48, y, sliderW - 48);
+	SendMessageW(m_rimIntensitySlider, TBM_SETRANGE, TRUE, MAKELONG(0, 100));
+	m_rimIntensityLabel = CreateLabel(L"", xPadding + labelW + sliderW + 10, y, 50);
+	y += rowH;
 
-	CreateLabel(L"スペキュラ:", xPadding, y, labelW);
+	CreateLabel(L"スペキュラ強度:", xPadding, y, labelW);
 	m_specularStepSlider = CreateSlider(ID_SPECULAR_STEP_SLIDER, xPadding + labelW, y, sliderW);
 	SendMessageW(m_specularStepSlider, TBM_SETRANGE, TRUE, MAKELONG(0, 100));
 	m_specularStepLabel = CreateLabel(L"", xPadding + labelW + sliderW + 10, y, 50);
@@ -1803,6 +1815,7 @@ void SettingsWindow::LoadLightScalarControls(const LightSettings& light)
 		{ m_globalSatSlider, light.globalSaturation, 100.0f },
 		{ m_keyIntensitySlider, light.keyLightIntensity, 100.0f },
 		{ m_fillIntensitySlider, light.fillLightIntensity, 100.0f },
+		{ m_selfShadowSmoothingSlider, light.selfShadowSmoothing, 100.0f },
 		{ m_ssaoIntensitySlider, light.ssaoIntensity, 100.0f },
 		{ m_outlineSilhouetteAngleSlider, light.outlineSilhouetteAngleTolerance, 100.0f },
 		{ m_outlineStrengthSlider, light.outlineWidthScale, 100.0f },
@@ -1866,6 +1879,7 @@ void SettingsWindow::ReadLightScalarControls(LightSettings& light) const
 		{ &light.globalSaturation, m_globalSatSlider, 100.0f },
 		{ &light.keyLightIntensity, m_keyIntensitySlider, 100.0f },
 		{ &light.fillLightIntensity, m_fillIntensitySlider, 100.0f },
+		{ &light.selfShadowSmoothing, m_selfShadowSmoothingSlider, 100.0f },
 		{ &light.ssaoIntensity, m_ssaoIntensitySlider, 100.0f },
 		{ &light.outlineSilhouetteAngleTolerance, m_outlineSilhouetteAngleSlider, 100.0f },
 		{ &light.outlineWidthScale, m_outlineStrengthSlider, 100.0f },
@@ -1923,6 +1937,7 @@ void SettingsWindow::UpdateLightValueLabels(const LightSettings& light)
 		{ m_globalSatLabel, light.globalSaturation },
 		{ m_keyIntensityLabel, light.keyLightIntensity },
 		{ m_fillIntensityLabel, light.fillLightIntensity },
+		{ m_selfShadowSmoothingLabel, light.selfShadowSmoothing },
 		{ m_ssaoIntensityLabel, light.ssaoIntensity },
 		{ m_outlineSilhouetteAngleLabel, light.outlineSilhouetteAngleTolerance },
 		{ m_outlineStrengthLabel, light.outlineWidthScale },
@@ -1954,7 +1969,9 @@ void SettingsWindow::UpdateLightDependentControlState(const LightSettings& light
 		light.antiAliasingMode == static_cast<int>(AntiAliasingMode::MsaaFxaa) ||
 		light.antiAliasingMode == static_cast<int>(AntiAliasingMode::MsaaSmaa);
 	SetControlsEnabled({ m_msaaSamplesCombo }, usesMsaa);
-	SetControlsEnabled({ m_shadowResolutionCombo }, light.selfShadowEnabled);
+	SetControlsEnabled(
+		{ m_shadowResolutionCombo, m_selfShadowSmoothingSlider, m_selfShadowSmoothingLabel },
+		light.selfShadowEnabled);
 	SetControlsEnabled({ m_ssaoIntensitySlider, m_ssaoIntensityLabel }, light.ssaoEnabled);
 	SetControlsEnabled(
 		{ m_outlineStrengthSlider, m_outlineStrengthLabel, m_outlineOpacitySlider, m_outlineOpacityLabel },

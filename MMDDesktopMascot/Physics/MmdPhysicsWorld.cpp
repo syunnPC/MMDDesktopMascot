@@ -533,6 +533,7 @@ void MmdPhysicsWorld::Reset()
 	m_currAnimationBoneGlobals.clear();
 	m_prevAnimationBoneGlobals.clear();
 	m_hasPrevAnimationBoneGlobals = false;
+	m_hasPrevModelToPhysicsTransform = false;
 	m_stepAccumulatorSeconds = 0.0f;
 	m_useDirectCollisionMaskSemantics = false;
 	m_prevImpulseMorphWeights.clear();
@@ -545,6 +546,11 @@ void MmdPhysicsWorld::Reset()
 #if defined(_DEBUG)
 	m_debugStats.Reset();
 #endif
+}
+
+void MmdPhysicsWorld::SetModelToPhysicsTransform(const DirectX::XMFLOAT4X4& transform)
+{
+	m_modelToPhysicsTransform = transform;
 }
 
 void MmdPhysicsWorld::BuildFromModel(const PmxModel& model, const BoneSolver& bones)
@@ -560,6 +566,7 @@ void MmdPhysicsWorld::BuildFromModel(const PmxModel& model, const BoneSolver& bo
 
 	const auto& rbDefs = model.RigidBodies();
 	const auto& softBodyDefs = model.SoftBodies();
+	const XMMATRIX modelToPhysics = ModelToPhysicsMatrix();
 	m_prevImpulseMorphWeights.assign(model.Morphs().size(), 0.0f);
 	m_softBodyVertexPositions.assign(model.Vertices().size(), {});
 	m_softBodyVertexMask.assign(model.Vertices().size(), 0);
@@ -704,16 +711,17 @@ void MmdPhysicsWorld::BuildFromModel(const PmxModel& model, const BoneSolver& bo
 		b.linearVelocity = { 0.0f, 0.0f, 0.0f };
 		b.angularVelocity = { 0.0f, 0.0f, 0.0f };
 
-		DirectX::XMMATRIX rb0 =
+		DirectX::XMMATRIX rb0Model =
 			MatrixRotationEulerXYZ(def.rotation.x, def.rotation.y, def.rotation.z) *
 			DirectX::XMMatrixTranslation(def.position.x, def.position.y, def.position.z);
+		DirectX::XMMATRIX rb0 = rb0Model * modelToPhysics;
 
 		DirectX::XMMATRIX localFromBone = DirectX::XMMatrixIdentity();
 		if (def.boneIndex >= 0 && def.boneIndex < static_cast<int>(bonesDef.size()))
 		{
 			DirectX::XMMATRIX bindBoneG = bindPoseGlobals.Get(def.boneIndex);
 			DirectX::XMMATRIX invBind = DirectX::XMMatrixInverse(nullptr, bindBoneG);
-			localFromBone = rb0 * invBind;
+			localFromBone = rb0Model * invBind;
 		}
 		DirectX::XMStoreFloat4x4(&b.localFromBone, localFromBone);
 
@@ -832,7 +840,7 @@ void MmdPhysicsWorld::BuildFromModel(const PmxModel& model, const BoneSolver& bo
 			const auto& boneGlobalF = bones.GetBoneGlobalMatrix(static_cast<size_t>(boneIndex));
 			DirectX::XMMATRIX boneG = DirectX::XMLoadFloat4x4(&boneGlobalF);
 			DirectX::XMMATRIX localFromBone = DirectX::XMLoadFloat4x4(&b.localFromBone);
-			rbCurrent = localFromBone * boneG;
+			rbCurrent = localFromBone * boneG * modelToPhysics;
 		}
 
 		DecomposeTR(rbCurrent, b.position, b.rotation);
@@ -857,7 +865,12 @@ void MmdPhysicsWorld::BuildFromModel(const PmxModel& model, const BoneSolver& bo
 		const int warmupSteps = std::clamp(m_settings.warmupSteps, 0, 240);
 		for (int i = 0; i < warmupSteps; ++i)
 		{
-			PrecomputeKinematicTargets(model, warmupBoneGlobals, warmupBoneGlobals);
+			PrecomputeKinematicTargets(
+				model,
+				warmupBoneGlobals,
+				warmupBoneGlobals,
+				m_modelToPhysicsTransform,
+				m_modelToPhysicsTransform);
 			RunRealBulletFixedStep(m_settings.fixedTimeStep);
 		}
 
@@ -891,6 +904,8 @@ void MmdPhysicsWorld::BuildFromModel(const PmxModel& model, const BoneSolver& bo
 	}
 	CaptureAnimationBoneGlobals(bones, m_prevAnimationBoneGlobals);
 	m_hasPrevAnimationBoneGlobals = true;
+	m_prevModelToPhysicsTransform = m_modelToPhysicsTransform;
+	m_hasPrevModelToPhysicsTransform = true;
 	m_stepAccumulatorSeconds = 0.0f;
 	m_isBuilt = true;
 	m_builtRevision = model.Revision();
@@ -902,6 +917,7 @@ void MmdPhysicsWorld::BuildConstraints(const PmxModel& model)
 
 	const auto& joints = model.Joints();
 	if (joints.empty()) return;
+	const XMMATRIX modelToPhysics = ModelToPhysicsMatrix();
 	m_joints.reserve(joints.size());
 	double defAnchorErrSum = 0.0;
 	float defAnchorErrMax = 0.0f;
@@ -921,8 +937,10 @@ void MmdPhysicsWorld::BuildConstraints(const PmxModel& model)
 		XMMATRIX Ta0 = MatrixFromTR(a0.position, a0.rotation);
 		XMMATRIX Tb0 = MatrixFromTR(b0.position, b0.rotation);
 
-		XMMATRIX Tj0 = MatrixRotationEulerXYZ(j.rotation.x, j.rotation.y, j.rotation.z) *
-			XMMatrixTranslation(j.position.x, j.position.y, j.position.z);
+		XMMATRIX Tj0 =
+			MatrixRotationEulerXYZ(j.rotation.x, j.rotation.y, j.rotation.z) *
+			XMMatrixTranslation(j.position.x, j.position.y, j.position.z) *
+			modelToPhysics;
 
 		XMMATRIX invTa0 = XMMatrixInverse(nullptr, Ta0);
 		XMMATRIX invTb0 = XMMatrixInverse(nullptr, Tb0);
@@ -958,7 +976,9 @@ void MmdPhysicsWorld::BuildConstraints(const PmxModel& model)
 			const XMVECTOR qB = Load4(b0.rotation);
 			const XMVECTOR wA = XMVectorAdd(pA, RotateVector(Load3(c.localAnchorA), qA));
 			const XMVECTOR wB = XMVectorAdd(pB, RotateVector(Load3(c.localAnchorB), qB));
-			const XMVECTOR jPos = XMVectorSet(j.position.x, j.position.y, j.position.z, 0.0f);
+			const XMVECTOR jPos = XMVector3TransformCoord(
+				XMVectorSet(j.position.x, j.position.y, j.position.z, 1.0f),
+				modelToPhysics);
 			const float errA = Length3(XMVectorSubtract(wA, jPos));
 			const float errB = Length3(XMVectorSubtract(wB, jPos));
 			const float err = std::max(errA, errB);
@@ -1318,6 +1338,7 @@ void MmdPhysicsWorld::UpdateSoftBodyVertexOverrides(const PmxModel& model)
 	float maxx = (std::numeric_limits<float>::lowest)();
 	float maxy = (std::numeric_limits<float>::lowest)();
 	float maxz = (std::numeric_limits<float>::lowest)();
+	const XMMATRIX physicsToModel = PhysicsToModelMatrix();
 
 	for (size_t softBodyIndex = 0; softBodyIndex < m_softBodies.size(); ++softBodyIndex)
 	{
@@ -1341,7 +1362,10 @@ void MmdPhysicsWorld::UpdateSoftBodyVertexOverrides(const PmxModel& model)
 
 			const size_t resolvedVertexIndex = static_cast<size_t>(vertexIndex);
 			auto& outPosition = m_softBodyVertexPositions[resolvedVertexIndex];
-			outPosition = ToXmFloat3(softBody->m_nodes[nodeIndex].m_x);
+			const XMFLOAT3 physicsPosition = ToXmFloat3(softBody->m_nodes[nodeIndex].m_x);
+			XMStoreFloat3(
+				&outPosition,
+				XMVector3TransformCoord(XMLoadFloat3(&physicsPosition), physicsToModel));
 			if (m_softBodyVertexMask[resolvedVertexIndex] == 0)
 			{
 				m_softBodyVertexMask[resolvedVertexIndex] = 1;
@@ -1384,6 +1408,14 @@ void MmdPhysicsWorld::Step(double dtSeconds,
 		 m_prevAnimationBoneGlobals.size() == m_currAnimationBoneGlobals.size())
 		? m_prevAnimationBoneGlobals
 		: m_currAnimationBoneGlobals;
+	const bool hasPendingStartTransform =
+		m_hasPrevModelToPhysicsTransform &&
+		m_hasPrevAnimationBoneGlobals &&
+		m_prevAnimationBoneGlobals.size() == m_currAnimationBoneGlobals.size();
+	const XMFLOAT4X4 pendingStartTransform =
+		hasPendingStartTransform
+		? m_prevModelToPhysicsTransform
+		: m_modelToPhysicsTransform;
 
 	auto BuildInterpolatedGlobals =
 		[&](const std::vector<XMFLOAT4X4>& fromGlobals,
@@ -1435,6 +1467,47 @@ void MmdPhysicsWorld::Step(double dtSeconds,
 			XMStoreFloat4x4(&outGlobals[boneIndex], blendedM);
 		}
 	};
+	auto BuildInterpolatedTransform =
+		[&](const XMFLOAT4X4& fromTransform,
+			const XMFLOAT4X4& toTransform,
+			float alpha,
+			XMFLOAT4X4& outTransform)
+	{
+		const float t = std::clamp(alpha, 0.0f, 1.0f);
+		if (t <= 1.0e-6f)
+		{
+			outTransform = fromTransform;
+			return;
+		}
+		if (t >= 1.0f - 1.0e-6f)
+		{
+			outTransform = toTransform;
+			return;
+		}
+
+		XMFLOAT3 pA{}, pB{};
+		XMFLOAT4 qA{}, qB{};
+		DecomposeTR(XMLoadFloat4x4(&fromTransform), pA, qA);
+		DecomposeTR(XMLoadFloat4x4(&toTransform), pB, qB);
+
+		const XMVECTOR tA = XMLoadFloat3(&pA);
+		const XMVECTOR tB = XMLoadFloat3(&pB);
+		const XMVECTOR blendedT = XMVectorLerp(tA, tB, t);
+
+		XMVECTOR qa = XMQuaternionNormalize(XMLoadFloat4(&qA));
+		XMVECTOR qb = XMQuaternionNormalize(XMLoadFloat4(&qB));
+		const float dot = XMVectorGetX(XMVector4Dot(qa, qb));
+		if (dot < 0.0f)
+		{
+			qb = XMVectorNegate(qb);
+		}
+
+		const XMVECTOR blendedQ = XMQuaternionNormalize(XMQuaternionSlerp(qa, qb, t));
+		const XMMATRIX blendedM =
+			XMMatrixRotationQuaternion(blendedQ) *
+			XMMatrixTranslationFromVector(blendedT);
+		XMStoreFloat4x4(&outTransform, blendedM);
+	};
 
 	const float fixedTimeStep = std::max(1.0e-4f, m_settings.fixedTimeStep);
 	const int configuredMaxSteps = std::max(1, m_settings.maxSubSteps);
@@ -1463,6 +1536,7 @@ void MmdPhysicsWorld::Step(double dtSeconds,
 		if (plannedSteps > 0)
 		{
 			std::vector<XMFLOAT4X4> retainedStartGlobals;
+			XMFLOAT4X4 retainedStartTransform{};
 			if (fullWindowSeconds > 1.0e-7f && retainedWindowSeconds + 1.0e-7f < fullWindowSeconds)
 			{
 				const float discardAlpha =
@@ -1472,14 +1546,22 @@ void MmdPhysicsWorld::Step(double dtSeconds,
 					m_currAnimationBoneGlobals,
 					discardAlpha,
 					retainedStartGlobals);
+				BuildInterpolatedTransform(
+					pendingStartTransform,
+					m_modelToPhysicsTransform,
+					discardAlpha,
+					retainedStartTransform);
 			}
 			else
 			{
 				retainedStartGlobals = pendingStartGlobals;
+				retainedStartTransform = pendingStartTransform;
 			}
 
 			std::vector<XMFLOAT4X4> stepStartGlobals;
 			std::vector<XMFLOAT4X4> stepEndGlobals;
+			XMFLOAT4X4 stepStartTransform{};
+			XMFLOAT4X4 stepEndTransform{};
 			for (int stepIndex = 0; stepIndex < plannedSteps; ++stepIndex)
 			{
 				const float stepBoundaryStart = static_cast<float>(stepIndex) * fixedTimeStep;
@@ -1498,11 +1580,23 @@ void MmdPhysicsWorld::Step(double dtSeconds,
 					m_currAnimationBoneGlobals,
 					alphaEnd,
 					stepEndGlobals);
+				BuildInterpolatedTransform(
+					retainedStartTransform,
+					m_modelToPhysicsTransform,
+					alphaStart,
+					stepStartTransform);
+				BuildInterpolatedTransform(
+					retainedStartTransform,
+					m_modelToPhysicsTransform,
+					alphaEnd,
+					stepEndTransform);
 				AdvanceSingleFixedStep(
 					fixedTimeStep,
 					model,
 					stepStartGlobals,
-					stepEndGlobals);
+					stepEndGlobals,
+					stepStartTransform,
+					stepEndTransform);
 				m_stepAccumulatorSeconds -= fixedTimeStep;
 			}
 
@@ -1514,15 +1608,28 @@ void MmdPhysicsWorld::Step(double dtSeconds,
 				m_currAnimationBoneGlobals,
 				consumedAlpha,
 				m_prevAnimationBoneGlobals);
+			BuildInterpolatedTransform(
+				retainedStartTransform,
+				m_modelToPhysicsTransform,
+				consumedAlpha,
+				m_prevModelToPhysicsTransform);
+			m_hasPrevModelToPhysicsTransform = true;
 		}
 		else if (retainedWindowSeconds <= 1.0e-7f)
 		{
 			m_prevAnimationBoneGlobals = m_currAnimationBoneGlobals;
+			m_prevModelToPhysicsTransform = m_modelToPhysicsTransform;
+			m_hasPrevModelToPhysicsTransform = true;
 		}
 	}
 
 	UpdateSoftBodyVertexOverrides(model);
 	m_hasPrevAnimationBoneGlobals = true;
+	if (!m_hasPrevModelToPhysicsTransform)
+	{
+		m_prevModelToPhysicsTransform = m_modelToPhysicsTransform;
+		m_hasPrevModelToPhysicsTransform = true;
+	}
 	static const bool s_disableWriteback = (std::getenv("MMD_PHYSICS_DISABLE_WRITEBACK") != nullptr);
 	if (!s_disableWriteback)
 	{
@@ -1534,9 +1641,16 @@ void MmdPhysicsWorld::AdvanceSingleFixedStep(
 	float stepDt,
 	const PmxModel& model,
 	const std::vector<XMFLOAT4X4>& startBoneGlobals,
-	const std::vector<XMFLOAT4X4>& targetBoneGlobals)
+	const std::vector<XMFLOAT4X4>& targetBoneGlobals,
+	const XMFLOAT4X4& startModelToPhysics,
+	const XMFLOAT4X4& targetModelToPhysics)
 {
-	PrecomputeKinematicTargets(model, startBoneGlobals, targetBoneGlobals);
+	PrecomputeKinematicTargets(
+		model,
+		startBoneGlobals,
+		targetBoneGlobals,
+		startModelToPhysics,
+		targetModelToPhysics);
 	RunRealBulletFixedStep(stepDt);
 }
 
@@ -1632,6 +1746,7 @@ void MmdPhysicsWorld::InitializeRealBulletWorld(const PmxModel& model)
 
 	const auto& rbDefs = model.RigidBodies();
 	const float collisionScale = 1.0f;
+	const XMMATRIX modelToPhysics = ModelToPhysicsMatrix();
 
 	m_btShapes.reserve(m_bodies.size());
 	m_btMotionStates.reserve(m_bodies.size());
@@ -1770,7 +1885,8 @@ void MmdPhysicsWorld::InitializeRealBulletWorld(const PmxModel& model)
 		const XMMATRIX worldB = MatrixFromTR(bodyB.position, bodyB.rotation);
 		const XMMATRIX worldJ =
 			MatrixRotationEulerXYZ(j.rotation.x, j.rotation.y, j.rotation.z) *
-			XMMatrixTranslation(j.position.x, j.position.y, j.position.z);
+			XMMatrixTranslation(j.position.x, j.position.y, j.position.z) *
+			modelToPhysics;
 
 		const XMMATRIX frameA = worldJ * XMMatrixInverse(nullptr, worldA);
 		const XMMATRIX frameB = worldJ * XMMatrixInverse(nullptr, worldB);
@@ -1905,6 +2021,14 @@ void MmdPhysicsWorld::InitializeRealBulletWorld(const PmxModel& model)
 
 		m_btSoftBodies.reserve(softBodyDefs.size());
 		m_softBodies.reserve(softBodyDefs.size());
+		auto toPhysicsPoint = [&](float x, float y, float z) -> btVector3
+		{
+			XMFLOAT3 transformed{};
+			XMStoreFloat3(
+				&transformed,
+				XMVector3TransformCoord(XMVectorSet(x, y, z, 1.0f), modelToPhysics));
+			return btVector3(transformed.x, transformed.y, transformed.z);
+		};
 
 			for (size_t softBodyIndex = 0; softBodyIndex < softBodyDefs.size(); ++softBodyIndex)
 			{
@@ -2006,9 +2130,10 @@ void MmdPhysicsWorld::InitializeRealBulletWorld(const PmxModel& model)
 				if (inserted)
 				{
 					const auto& vertex = vertices[vertexIndex];
-					nodePositions.push_back(vertex.px);
-						nodePositions.push_back(vertex.py);
-						nodePositions.push_back(vertex.pz);
+					const btVector3 nodePosition = toPhysicsPoint(vertex.px, vertex.py, vertex.pz);
+					nodePositions.push_back(nodePosition.x());
+					nodePositions.push_back(nodePosition.y());
+					nodePositions.push_back(nodePosition.z());
 						nodeVertexIndices.push_back(static_cast<int>(vertexIndex));
 					}
 
@@ -2107,8 +2232,8 @@ void MmdPhysicsWorld::InitializeRealBulletWorld(const PmxModel& model)
 					const int ropeResolution = std::max(0, static_cast<int>(nodeVertexIndices.size()) - 2);
 					softBody = std::unique_ptr<btSoftBody>(btSoftBodyHelpers::CreateRope(
 						m_btSoftWorld->getWorldInfo(),
-						btVector3(startVertex.px, startVertex.py, startVertex.pz),
-						btVector3(endVertex.px, endVertex.py, endVertex.pz),
+						toPhysicsPoint(startVertex.px, startVertex.py, startVertex.pz),
+						toPhysicsPoint(endVertex.px, endVertex.py, endVertex.pz),
 						ropeResolution,
 						0));
 
@@ -2120,7 +2245,7 @@ void MmdPhysicsWorld::InitializeRealBulletWorld(const PmxModel& model)
 						for (int nodeIndex = 0; nodeIndex < nodeCount; ++nodeIndex)
 						{
 							const auto& vertex = vertices[static_cast<size_t>(nodeVertexIndices[static_cast<size_t>(nodeIndex)])];
-							const btVector3 nodePosition(vertex.px, vertex.py, vertex.pz);
+							const btVector3 nodePosition = toPhysicsPoint(vertex.px, vertex.py, vertex.pz);
 							softBody->m_nodes[nodeIndex].m_x = nodePosition;
 							softBody->m_nodes[nodeIndex].m_q = nodePosition;
 						}
@@ -2666,9 +2791,13 @@ void MmdPhysicsWorld::RunRealBulletFixedStep(float fixedStepDt)
 void MmdPhysicsWorld::PrecomputeKinematicTargets(
 	const PmxModel& model,
 	const std::vector<XMFLOAT4X4>& startBoneGlobals,
-	const std::vector<XMFLOAT4X4>& targetBoneGlobals)
+	const std::vector<XMFLOAT4X4>& targetBoneGlobals,
+	const XMFLOAT4X4& startModelToPhysics,
+	const XMFLOAT4X4& targetModelToPhysics)
 {
 	const auto& bonesDef = model.Bones();
+	const XMMATRIX startFrame = XMLoadFloat4x4(&startModelToPhysics);
+	const XMMATRIX targetFrame = XMLoadFloat4x4(&targetModelToPhysics);
 
 	for (size_t i = 0; i < m_bodies.size(); ++i)
 	{
@@ -2688,8 +2817,8 @@ void MmdPhysicsWorld::PrecomputeKinematicTargets(
 		DirectX::XMMATRIX localFromBone = DirectX::XMLoadFloat4x4(&b.localFromBone);
 		const XMMATRIX boneStartG = XMLoadFloat4x4(&startBoneGlobals[static_cast<size_t>(boneIndex)]);
 		const XMMATRIX boneTargetG = XMLoadFloat4x4(&targetBoneGlobals[static_cast<size_t>(boneIndex)]);
-		const XMMATRIX rbStartG = localFromBone * boneStartG;
-		const XMMATRIX rbTargetG = localFromBone * boneTargetG;
+		const XMMATRIX rbStartG = localFromBone * boneStartG * startFrame;
+		const XMMATRIX rbTargetG = localFromBone * boneTargetG * targetFrame;
 
 		DecomposeTR(rbStartG, b.kinematicStartPos, b.kinematicStartRot);
 		DecomposeTR(rbTargetG, b.kinematicTargetPos, b.kinematicTargetRot);
@@ -2718,6 +2847,7 @@ void MmdPhysicsWorld::WriteBackBones(const PmxModel& model, BoneSolver& bones)
 
 	std::fill(m_hasDesiredGlobal.begin(), m_hasDesiredGlobal.end(), uint8_t{ 0 });
 	std::fill(m_hasAppliedGlobal.begin(), m_hasAppliedGlobal.end(), uint8_t{ 0 });
+	const XMMATRIX physicsToModel = PhysicsToModelMatrix();
 
 	const size_t rbCount = std::min(rbDefs.size(), m_bodies.size());
 	auto ShouldWriteBack = [&](const PmxModel::RigidBody& def, const Body& b) -> bool
@@ -2764,7 +2894,7 @@ void MmdPhysicsWorld::WriteBackBones(const PmxModel& model, BoneSolver& bones)
 		const XMVECTOR qCheck = Load4(renderRot);
 		if (!IsVectorFinite3(pCheck) || !IsVectorFinite4(qCheck)) continue;
 
-		const XMMATRIX rbG = MatrixFromTR(renderPos, renderRot);
+		const XMMATRIX rbG = MatrixFromTR(renderPos, renderRot) * physicsToModel;
 		const XMMATRIX localFromBone = XMLoadFloat4x4(&b.localFromBone);
 		const XMMATRIX invLocalFromBone = XMMatrixInverse(nullptr, localFromBone);
 		const XMMATRIX boneG = invLocalFromBone * rbG;
@@ -2907,6 +3037,25 @@ DirectX::XMFLOAT3 MmdPhysicsWorld::ExtractTranslation(const DirectX::XMMATRIX& m
 {
 	XMFLOAT3 t; XMStoreFloat3(&t, m.r[3]); return t;
 }
+
+XMMATRIX MmdPhysicsWorld::ModelToPhysicsMatrix() const
+{
+	return XMLoadFloat4x4(&m_modelToPhysicsTransform);
+}
+
+XMMATRIX MmdPhysicsWorld::PhysicsToModelMatrix() const
+{
+	const XMMATRIX modelToPhysics = ModelToPhysicsMatrix();
+	XMVECTOR determinant = XMVectorZero();
+	const XMMATRIX physicsToModel = XMMatrixInverse(&determinant, modelToPhysics);
+	const float det = XMVectorGetX(determinant);
+	if (!std::isfinite(det) || std::abs(det) <= 1.0e-8f)
+	{
+		return XMMatrixIdentity();
+	}
+	return physicsToModel;
+}
+
 float MmdPhysicsWorld::ComputeDepth(const std::vector<PmxModel::Bone>& bones, int boneIndex)
 {
 	float d = 0; int c = boneIndex; int g = 0;

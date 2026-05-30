@@ -93,6 +93,7 @@ public:
 	{
 		return m_motionTransform;
 	}
+	void SetPhysicsPresentationTransform(const DirectX::XMFLOAT4X4& transform);
 
 	double TimeSeconds() const
 	{
@@ -187,6 +188,7 @@ private:
 	int32_t m_boneIdxEyeR{ -1 };
 
 	BonePose m_lastPose{};
+	DirectX::XMFLOAT4X4 m_physicsPresentationTransform{};
 	bool m_hasLastPose{ false };
 	BonePose m_transitionPose{};
 	bool m_hasTransitionPose{ false };

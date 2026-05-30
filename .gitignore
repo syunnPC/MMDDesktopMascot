@@ -91,3 +91,4 @@ packages/
 # Gemini / AI tool
 # ============================================================
 .gemini/
+.antigravitycli/

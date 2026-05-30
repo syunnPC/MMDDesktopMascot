@@ -1281,7 +1281,7 @@ void DcompRenderer::Render(const MmdAnimator& animator)
 
 		scene->specPower = 48.0f;
 		scene->specColor = { 1.0f, 1.0f, 1.0f };
-		scene->specStrength = 0.18f;
+		scene->specStrength = 0.45f * std::clamp(m_lightSettings.specularStep, 0.0f, 1.0f);
 		scene->brightness = m_lightSettings.brightness;
 		scene->toonContrast = m_lightSettings.toonContrast;
 		scene->shadowHueShift = m_lightSettings.shadowHueShiftDeg * (XM_PI / 180.0f);
@@ -1338,6 +1338,7 @@ void DcompRenderer::Render(const MmdAnimator& animator)
 		scene->rimSoftness = 0.18f;
 		scene->rimColor = { 0.55f, 0.72f, 1.0f };
 		scene->toonDebugView = static_cast<uint32_t>(std::clamp(m_lightSettings.toonDebugView, 0, 12));
+		scene->selfShadowSmoothing = std::clamp(m_lightSettings.selfShadowSmoothing, 0.0f, 1.0f);
 	}
 
 	auto srvHeap = m_gpuResources.GetSrvHeap();

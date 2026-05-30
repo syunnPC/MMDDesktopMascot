@@ -110,6 +110,7 @@ MmdAnimator::MmdAnimator()
 {
 	m_lastUpdate = std::chrono::steady_clock::now();
 	DirectX::XMStoreFloat4x4(&m_motionTransform, DirectX::XMMatrixIdentity());
+	DirectX::XMStoreFloat4x4(&m_physicsPresentationTransform, DirectX::XMMatrixIdentity());
 	m_boneSolver = std::make_unique<BoneSolver>();
 	m_physicsWorld = std::make_unique<MmdPhysicsWorld>();
 
@@ -538,6 +539,15 @@ const PhysicsSettings& MmdAnimator::GetPhysicsSettings() const
 	return m_physicsWorld->GetSettings();
 }
 
+void MmdAnimator::SetPhysicsPresentationTransform(const DirectX::XMFLOAT4X4& transform)
+{
+	m_physicsPresentationTransform = transform;
+	if (m_physicsWorld)
+	{
+		m_physicsWorld->SetModelToPhysicsTransform(transform);
+	}
+}
+
 float MmdAnimator::ComputeCurrentFrame(const VmdMotion* motion) const
 {
 	if (!motion) return 0.0f;
@@ -834,6 +844,7 @@ void MmdAnimator::StepPhysicsWorld(double dtSeconds)
 	if (!m_physicsEnabled || !m_model) return;
 	if (m_model->RigidBodies().empty() && m_model->SoftBodies().empty()) return;
 
+	m_physicsWorld->SetModelToPhysicsTransform(m_physicsPresentationTransform);
 	if (!m_physicsWorld->IsBuilt() || m_physicsWorld->BuiltRevision() != m_model->Revision())
 	{
 		m_physicsWorld->BuildFromModel(*m_model, *m_boneSolver);

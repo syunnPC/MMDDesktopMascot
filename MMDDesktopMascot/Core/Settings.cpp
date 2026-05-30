@@ -433,6 +433,7 @@ namespace
 		{ L"toonContrast", &LightSettings::toonContrast },
 		{ L"shadowHueShiftDeg", &LightSettings::shadowHueShiftDeg },
 		{ L"shadowSaturationBoost", &LightSettings::shadowSaturationBoost },
+		{ L"selfShadowSmoothing", &LightSettings::selfShadowSmoothing },
 		{ L"shadowRampShift", &LightSettings::shadowRampShift },
 		{ L"rimWidth", &LightSettings::rimWidth },
 		{ L"rimIntensity", &LightSettings::rimIntensity },

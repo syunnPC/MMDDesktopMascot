@@ -577,6 +577,7 @@ void App::Update()
 	if (m_isLoading) return;
 
 	UpdateLookAtTracking();
+	UpdatePhysicsPresentationTransform();
 
 	if (m_animator)
 	{
@@ -1083,6 +1084,75 @@ void App::UpdateLookAtTracking()
 	const float nextYaw = currentYaw + (targetYaw - currentYaw) * kSmoothing;
 	const float nextPitch = currentPitch + (targetPitch - currentPitch) * kSmoothing;
 	m_animator->SetLookAtState(true, nextYaw, nextPitch);
+}
+
+float App::ComputePhysicsWindowUnitsPerPixel() const
+{
+	if (!m_animator || !m_animator->Model())
+	{
+		return 0.02f;
+	}
+
+	float minx{}, miny{}, minz{}, maxx{}, maxy{}, maxz{};
+	m_animator->Model()->GetBounds(minx, miny, minz, maxx, maxy, maxz);
+	const float modelSize = std::max({ maxx - minx, maxy - miny, maxz - minz, 1.0f });
+
+	RECT client{};
+	const HWND renderWnd = m_windowManager.RenderWindow();
+	const float clientHeight =
+		(renderWnd && GetClientRect(renderWnd, &client))
+		? static_cast<float>(std::max(1L, client.bottom - client.top))
+		: 600.0f;
+	const float scale = std::max(0.1f, m_settingsData.light.modelScale);
+	return modelSize / (clientHeight * scale);
+}
+
+void App::UpdatePhysicsPresentationTransform()
+{
+	if (!m_animator)
+	{
+		return;
+	}
+
+	const HWND renderWnd = m_windowManager.RenderWindow();
+	if (renderWnd)
+	{
+		RECT rc{};
+		if (GetWindowRect(renderWnd, &rc))
+		{
+			const POINT position{ rc.left, rc.top };
+
+			if (!m_hasPhysicsWindowPosition)
+			{
+				m_lastPhysicsWindowPosition = position;
+				m_hasPhysicsWindowPosition = true;
+			}
+			else
+			{
+				const int dx = position.x - m_lastPhysicsWindowPosition.x;
+				const int dy = position.y - m_lastPhysicsWindowPosition.y;
+				if (dx != 0 || dy != 0)
+				{
+					const float unitsPerPixel = ComputePhysicsWindowUnitsPerPixel();
+					m_physicsWindowOffset.x += static_cast<float>(dx) * unitsPerPixel;
+					m_physicsWindowOffset.y -= static_cast<float>(dy) * unitsPerPixel;
+				}
+				m_lastPhysicsWindowPosition = position;
+			}
+		}
+	}
+
+	using namespace DirectX;
+	const float yaw = m_renderer ? m_renderer->GetCameraYaw() : 0.0f;
+	const float pitch = m_renderer ? m_renderer->GetCameraPitch() : 0.0f;
+	const XMMATRIX modelToPhysics =
+		XMMatrixRotationX(pitch) *
+		XMMatrixRotationY(yaw) *
+		XMMatrixTranslation(m_physicsWindowOffset.x, m_physicsWindowOffset.y, 0.0f);
+
+	XMFLOAT4X4 transform{};
+	XMStoreFloat4x4(&transform, modelToPhysics);
+	m_animator->SetPhysicsPresentationTransform(transform);
 }
 
 void App::ApplySettings(const AppSettings& settings, bool persist)

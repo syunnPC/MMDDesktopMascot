@@ -95,7 +95,8 @@ cbuffer SceneCB : register(b0)
     float3 g_rimColor;
 
     uint g_toonDebugView;
-    float3 _pad4;
+    float g_selfShadowSmoothing;
+    float2 _pad4;
 };
 
 cbuffer Material : register(b1)
@@ -334,7 +335,8 @@ float SampleSelfShadow(float3 worldPos, float3 normal, float3 lightDir)
     float depthBias = g_shadowBias * lerp(3.9, 1.2, ndotl);
     float receiverSoftness = saturate(1.0 - ndotl);
     float2 texel = float2(g_shadowMapInvSize, g_shadowMapInvSize);
-    float filterRadius = g_shadowMapInvSize * lerp(3.2, 7.0, receiverSoftness);
+    float smoothing = saturate(g_selfShadowSmoothing);
+    float filterRadius = g_shadowMapInvSize * lerp(3.2, 7.0, receiverSoftness) * lerp(1.0, 2.05, smoothing);
 
     float visibility = 0.0;
     float totalWeight = 0.0;
@@ -356,8 +358,9 @@ float SampleSelfShadow(float3 worldPos, float3 normal, float3 lightDir)
         g_shadowSamp,
         shadowUv,
         shadowDepth - depthBias * 0.85);
-    visibility += center * 0.95;
-    totalWeight += 0.95;
+    float centerWeight = lerp(0.95, 0.22, smoothing);
+    visibility += center * centerWeight;
+    totalWeight += centerWeight;
 
     return visibility / max(totalWeight, 1.0e-4);
 }
@@ -370,7 +373,8 @@ float StylizeSelfShadow(float visibility, float2 pixel)
     }
 
     float threshold = saturate(0.5 + g_shadowRampShift * 0.18);
-    float softness = max(0.06, g_toonShadowSoftness * 2.9);
+    float smoothing = saturate(g_selfShadowSmoothing);
+    float softness = max(0.06, g_toonShadowSoftness * 2.9) + smoothing * 0.08;
     float jitter = (ScreenStableNoise(pixel) - 0.5) * softness * 0.12;
     return smoothstep(
         threshold - softness + jitter,
@@ -530,14 +534,19 @@ PSOut PSMain(PSIn i)
     specMask *= saturate(specMul) * saturate(toonLit + 0.35);
     float fillSpecMask = ComputeToonSpecular(N_base, V, Lfill, max(specPower, 1.0));
     fillSpecMask *= saturate(specMul) * saturate(fillLit + 0.25f) * fillShadowRelief * 0.35f * max(g_lightInt1, 0.0f);
-    float3 spec = g_specularMat * g_specColor * g_specStrength * (specMask * g_lightColor0 + fillSpecMask * g_lightColor1);
+    float specMaterialLum = Luminance(saturate(g_specularMat));
+    float3 specularMat = (specMaterialLum > 0.001f)
+        ? g_specularMat
+        : lerp(baseColor, float3(1.0f, 1.0f, 1.0f), 0.35f) * 0.08f;
+    float3 spec = specularMat * g_specColor * g_specStrength * (specMask * g_lightColor0 + fillSpecMask * g_lightColor1);
     color += spec;
 
     if (materialType == MATERIAL_HAIR)
     {
         float hairSpecMask = g_hairSpecMask.Sample(g_samp, i.uv).r;
-        float hairSpec = ComputeHairSpecular(N_base, V, L) * hairSpecMask * saturate(toonLit + 0.25);
-        float fillHairSpec = ComputeHairSpecular(N_base, V, Lfill) * hairSpecMask * saturate(fillLit + 0.20f) * fillShadowRelief * 0.35f * max(g_lightInt1, 0.0f);
+        float globalHairSpec = saturate(g_specStrength / 0.45f);
+        float hairSpec = ComputeHairSpecular(N_base, V, L) * hairSpecMask * saturate(toonLit + 0.25) * globalHairSpec;
+        float fillHairSpec = ComputeHairSpecular(N_base, V, Lfill) * hairSpecMask * saturate(fillLit + 0.20f) * fillShadowRelief * 0.35f * max(g_lightInt1, 0.0f) * globalHairSpec;
         color += max(g_specularMat, float3(0.15, 0.15, 0.15)) * (hairSpec * g_lightColor0 + fillHairSpec * g_lightColor1);
     }
 

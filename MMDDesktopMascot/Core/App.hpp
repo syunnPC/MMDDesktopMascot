@@ -90,6 +90,8 @@ private:
 	void SyncSettingsFromRuntime();
 	void ApplyAnimatorRuntimeSettings();
 	void UpdateLookAtTracking();
+	void UpdatePhysicsPresentationTransform();
+	float ComputePhysicsWindowUnitsPerPixel() const;
 	bool ApplyThemeCommand(UINT id);
 	bool ApplyMotionCommand(UINT id);
 	void PostLoadProgress(float progress, const wchar_t* message);
@@ -146,4 +148,7 @@ private:
 	mutable std::chrono::steady_clock::time_point m_lastMonitorRefreshRateQuery{};
 
 	bool m_lookAtEnabled{ false };
+	bool m_hasPhysicsWindowPosition{ false };
+	POINT m_lastPhysicsWindowPosition{};
+	DirectX::XMFLOAT2 m_physicsWindowOffset{};
 };

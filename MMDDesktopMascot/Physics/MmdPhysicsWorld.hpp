@@ -33,6 +33,7 @@ public:
 	void Reset();
 
 	void BuildFromModel(const PmxModel& model, const BoneSolver& bones);
+	void SetModelToPhysicsTransform(const DirectX::XMFLOAT4X4& transform);
 	void Step(double dtSeconds,
 			  const PmxModel& model,
 			  BoneSolver& bones,
@@ -158,7 +159,9 @@ private:
 	void PrecomputeKinematicTargets(
 		const PmxModel& model,
 		const std::vector<DirectX::XMFLOAT4X4>& startBoneGlobals,
-		const std::vector<DirectX::XMFLOAT4X4>& targetBoneGlobals);
+		const std::vector<DirectX::XMFLOAT4X4>& targetBoneGlobals,
+		const DirectX::XMFLOAT4X4& startModelToPhysics,
+		const DirectX::XMFLOAT4X4& targetModelToPhysics);
 	void ApplyImpulseMorphs(const PmxModel& model, const std::vector<float>& morphWeights);
 	void UpdateSoftBodyVertexOverrides(const PmxModel& model);
 
@@ -176,6 +179,8 @@ private:
 	static void DecomposeTR(const DirectX::XMMATRIX& m, DirectX::XMFLOAT3& outT, DirectX::XMFLOAT4& outR);
 	static float ComputeDepth(const std::vector<PmxModel::Bone>& bones, int boneIndex);
 	DirectX::XMFLOAT3 ExtractTranslation(const DirectX::XMMATRIX& m);
+	DirectX::XMMATRIX ModelToPhysicsMatrix() const;
+	DirectX::XMMATRIX PhysicsToModelMatrix() const;
 
 	Settings m_settings{};
 
@@ -190,7 +195,9 @@ private:
 		float stepDt,
 		const PmxModel& model,
 		const std::vector<DirectX::XMFLOAT4X4>& startBoneGlobals,
-		const std::vector<DirectX::XMFLOAT4X4>& targetBoneGlobals);
+		const std::vector<DirectX::XMFLOAT4X4>& targetBoneGlobals,
+		const DirectX::XMFLOAT4X4& startModelToPhysics,
+		const DirectX::XMFLOAT4X4& targetModelToPhysics);
 	void InitializeRealBulletWorld(const PmxModel& model);
 	void DestroyRealBulletWorld();
 	void RunRealBulletFixedStep(float fixedStepDt);
@@ -215,6 +222,19 @@ private:
 	std::vector<DirectX::XMFLOAT4X4> m_currAnimationBoneGlobals;
 	std::vector<DirectX::XMFLOAT4X4> m_prevAnimationBoneGlobals;
 	bool m_hasPrevAnimationBoneGlobals{ false };
+	DirectX::XMFLOAT4X4 m_modelToPhysicsTransform{
+		1.0f, 0.0f, 0.0f, 0.0f,
+		0.0f, 1.0f, 0.0f, 0.0f,
+		0.0f, 0.0f, 1.0f, 0.0f,
+		0.0f, 0.0f, 0.0f, 1.0f
+	};
+	DirectX::XMFLOAT4X4 m_prevModelToPhysicsTransform{
+		1.0f, 0.0f, 0.0f, 0.0f,
+		0.0f, 1.0f, 0.0f, 0.0f,
+		0.0f, 0.0f, 1.0f, 0.0f,
+		0.0f, 0.0f, 0.0f, 1.0f
+	};
+	bool m_hasPrevModelToPhysicsTransform{ false };
 	float m_stepAccumulatorSeconds{ 0.0f };
 	bool m_useDirectCollisionMaskSemantics{ false };
 	std::vector<float> m_prevImpulseMorphWeights;

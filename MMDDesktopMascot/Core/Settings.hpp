@@ -91,6 +91,7 @@ struct LightSettings
 	float toonContrast = 1.15f;
 	float shadowHueShiftDeg = -8.0f;
 	float shadowSaturationBoost = 0.25f;
+	float selfShadowSmoothing = 0.35f;
 	float rimWidth = 0.6f;
 	float rimIntensity = 0.25f;
 	float specularStep = 0.3f;

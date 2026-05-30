@@ -60,6 +60,14 @@ public:
 
 	void AdjustScale(float delta);
 	void AddCameraRotation(float dxPixels, float dyPixels);
+	float GetCameraYaw() const
+	{
+		return m_camera.GetYaw();
+	}
+	float GetCameraPitch() const
+	{
+		return m_camera.GetPitch();
+	}
 
 	// 3D空間(Model Local)の座標をスクリーン(クライアント)座標に変換する
 	DirectX::XMFLOAT3 ProjectToScreen(const DirectX::XMFLOAT3& localPos) const;
@@ -191,7 +199,8 @@ private:
         DirectX::XMFLOAT3 rimColor{ 0.55f, 0.72f, 1.0f };
 
         uint32_t toonDebugView{ 0 };
-        DirectX::XMFLOAT3 _toonDebugPad{};
+        float selfShadowSmoothing{ 0.35f };
+        DirectX::XMFLOAT2 _toonDebugPad{};
     };
     #pragma warning(pop)
 
